@@ -30,3 +30,9 @@ $clientConfig->setProfileFile(__DIR__ . '/.credentials.ini');
 $clientConfig->setLogger($logger);
 
 $client = new OnlineClient($clientConfig);
+
+$formatter = new \Intacct\Logging\MessageFormatter(
+    '"{method} {target} HTTP/{version}" {code}'
+);
+$client->getConfig()->setLogLevel(\Psr\Log\LogLevel::INFO);
+$client->getConfig()->setLogMessageFormatter($formatter);
