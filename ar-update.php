@@ -4,88 +4,125 @@ require __DIR__ . '/bootstrap.php';
 
 use Intacct\Functions\AccountsReceivable\ArPaymentCreate;
 
+function getNewFilePath($originalFilePath, $additionalFileName){
+    $originalFileName = basename($originalFilePath);
+    $dotPosition = strpos($originalFileName, '.');
+    $newFileName = '';
+    if($dotPosition === FALSE){
+        $newFileName = $originalFileName . $additionalFileName;
+    }
+    else{
+        $newFileName = substr_replace($originalFileName, $additionalFileName, $dotPosition, 0);
+    }
+    $newFilePath = substr($originalFilePath, 0, strlen($originalFilePath)-strlen($originalFileName)) . $newFileName;
+    return $newFilePath;
+}
+
 // ROW NAMES
 $paymentAmountRowName = 'payment_amount';
 $customerAccountIdRowName = 'customer_account_id';
 $dateReceivedRowName = 'date_received';
 $paymentMethodRowName = 'payment_method';
 $bankAccountIdRowName = 'bank_account_id';
-// ROW IDS
-$paymentAmountRowIndex = NULL;
-$customerAccountIdRowIndex = NULL;
-$dateReceivedRowIndex = NULL;
-$paymentMethodRowIndex = NULL;
-$bankAccountIdRowIndex = NULL;
-// FILE STATE
-$csvFilePath = NULL;
-$csvFileHandle = NULL;
-$csvFileDataRow = NULL;
-// DATA STATE
-$dataRows = NULL;
+$failureMessageRowName = 'failure_message';
+$failureClassRowName = 'failure_class';
+$failureErrorRowName = 'failure_error';
+// ROW INDICES (IN INSERTION ORDER)
+$rowIndicesByRowName;
+// INPUT FILE STATE
+$csvInputFilePath = NULL;
+$csvInputFileHandle = NULL;
+$csvInputFileDataRow = NULL;
+// OUTPUT SUCCESS FILE STATE
+$csvOutputSuccessFileNameTag = '_success';
+$csvOutputSuccessFilePath = NULL;
+$csvOutputSuccessFileHandle = NULL;
+$csvOutputSuccessFileDataRow = NULL;
+// OUTPUT FAILURE FILE STATE
+$csvOutputFailureFileNameTag = '_failure';
+$csvOutputFailureFilePath = NULL;
+$csvOutputFailureFileHandle = NULL;
+$csvOutputFailureFileDataRow = NULL;
+// DATA ROWS
+$dataInputRows = NULL;
+$dataInputRowNames = NULL;
+$dataInputSuccessRows = NULL;
+$dataInputFailureRows = NULL;
 
-// GET CSV FILE PATH
+// GET FILE PATHS
 if(count($argv) !== 2){
     exit("Error: missing CSV file path\n");
 }
-$csvFilePath = $argv[1];
+$csvInputFilePath = $argv[1];
+$csvOutputSuccessFilePath = getNewFilePath($csvInputFilePath, $csvOutputSuccessFileNameTag);
+$csvOutputFailureFilePath = getNewFilePath($csvInputFilePath, $csvOutputFailureFileNameTag);
 
-// GET INPUT FILE HANDLE
-$csvFileHandle = @fopen($csvFilePath, "r");
-if($csvFileHandle === FALSE){
-    exit("Error: unable to open CSV file for reading\n");
+// GET FILE HANDLES
+$csvInputFileHandle = @fopen($csvInputFilePath, 'r');
+if($csvInputFileHandle === FALSE){
+    exit('Error: unable to open CSV input file for reading (' . $csvInputFilePath . ")\n");
+}
+$csvOutputSuccessFileHandle = @fopen($csvOutputSuccessFilePath, 'w');
+if($csvOutputSuccessFileHandle === FALSE){
+    exit('Error: unable to open CSV output success file for writing: (' . $csvOutputSuccessFilePath . ")\n");
+}
+$csvOutputFailureFileHandle = @fopen($csvOutputFailureFilePath, 'w');
+if($csvOutputFailureFileHandle === FALSE){
+    exit('Error: unable to open CSV output failure file for writing: (' . $csvOutputFailureFilePath . ")\n");
 }
 
 // GET FIRST ROW OF DATA (HEADER)
-$csvFileDataRow = fgetcsv($csvFileHandle);
-if($csvFileDataRow === FALSE){
+$csvInputFileDataRow = fgetcsv($csvInputFileHandle);
+if($csvInputFileDataRow === FALSE){
     exit("Error: unable to get first row from CSV\n");
 }
 
 // GET PAYMENT AMOUNT & CUSTOMER ACCOUNT ID INDICES
-for($i=0; $i<count($csvFileDataRow); $i++){
-    $csvFileDataCell = $csvFileDataRow[$i];
-    if($csvFileDataCell === $paymentAmountRowName){
-        $paymentAmountRowIndex = $i;
+$rowIndicesByRowName = array();
+for($i=0; $i<count($csvInputFileDataRow); $i++){
+    $csvFileDataCell = $csvInputFileDataRow[$i];
+    if($csvFileDataCell === $customerAccountIdRowName){
+        $rowIndicesByRowName[$customerAccountIdRowName] = $i;
     }
-    else if($csvFileDataCell === $customerAccountIdRowName){
-        $customerAccountIdRowIndex = $i;
+    else if($csvFileDataCell === $paymentAmountRowName){
+        $rowIndicesByRowName[$paymentAmountRowName] = $i;
     }
     else if($csvFileDataCell === $dateReceivedRowName){
-        $dateReceivedRowIndex = $i;
+        $rowIndicesByRowName[$dateReceivedRowName] = $i;
     }
     else if($csvFileDataCell === $paymentMethodRowName){
-        $paymentMethodRowIndex = $i;
+        $rowIndicesByRowName[$paymentMethodRowName] = $i;
     }
     else if($csvFileDataCell === $bankAccountIdRowName){
-        $bankAccountIdRowIndex = $i;
+        $rowIndicesByRowName[$bankAccountIdRowName] = $i;
     }
 }
-if($paymentAmountRowIndex === NULL){
+if($rowIndicesByRowName[$paymentAmountRowName] === NULL){
     exit('Error: unable to find column named: ' . $paymentAmountRowName . "\n");
 }
-else if($customerAccountIdRowIndex === NULL){
+else if($rowIndicesByRowName[$customerAccountIdRowName] === NULL){
     exit('Error: unable to find column named: ' . $customerAccountIdRowName . "\n");
 }
-else if($dateReceivedRowIndex === NULL){
+else if($rowIndicesByRowName[$dateReceivedRowName] === NULL){
     exit('Error: unable to find column named: ' . $dateReceivedRowName . "\n");
 }
-else if($paymentMethodRowIndex === NULL){
+else if($rowIndicesByRowName[$paymentMethodRowName] === NULL){
     exit('Error: unable to find column named: ' . $paymentMethodRowName . "\n");
 }
-else if($bankAccountIdRowIndex === NULL){
+else if($rowIndicesByRowName[$bankAccountIdRowName] === NULL){
     exit('Error: unable to find column named: ' . $bankAccountIdRowName . "\n");
 }
 
 // READ AND VALIDATE ROWS
 $rowIndex = 2;
 $rowReadCount = 0;
-$dataRows = array();
-while(($csvFileDataRow = fgetcsv($csvFileHandle)) !== FALSE){
-    $customerAccountId = trim($csvFileDataRow[$customerAccountIdRowIndex]);
-    $paymentAmount = trim($csvFileDataRow[$paymentAmountRowIndex]);
-    $dateReceived = trim($csvFileDataRow[$dateReceivedRowIndex]);
-    $paymentMethod = trim($csvFileDataRow[$paymentMethodRowIndex]);
-    $bankAccountId = trim($csvFileDataRow[$bankAccountIdRowIndex]);
+$dataInputRows = array();
+while(($csvInputFileDataRow = fgetcsv($csvInputFileHandle)) !== FALSE){
+    $customerAccountId = trim($csvInputFileDataRow[$rowIndicesByRowName[$customerAccountIdRowName]]);
+    $paymentAmount = trim($csvInputFileDataRow[$rowIndicesByRowName[$paymentAmountRowName]]);
+    $dateReceived = trim($csvInputFileDataRow[$rowIndicesByRowName[$dateReceivedRowName]]);
+    $paymentMethod = trim($csvInputFileDataRow[$rowIndicesByRowName[$paymentMethodRowName]]);
+    $bankAccountId = trim($csvInputFileDataRow[$rowIndicesByRowName[$bankAccountIdRowName]]);
     // VERIFY ALL FIELDS ARE NOT EMPTY
     if(strlen($paymentAmount) > 0
         && strlen($customerAccountId) > 0){
@@ -96,13 +133,13 @@ while(($csvFileDataRow = fgetcsv($csvFileHandle)) !== FALSE){
         else{
             $rowReadCount++;
             // ADD ROW TO ROWS
-            $dataRow = array();
-            $dataRow[$customerAccountIdRowName] = $customerAccountId;
-            $dataRow[$paymentAmountRowName] = $paymentAmount;
-            $dataRow[$dateReceivedRowName] = $dateReceived;
-            $dataRow[$paymentMethodRowName] = $paymentMethod;
-            $dataRow[$bankAccountIdRowName] = $bankAccountId;
-            $dataRows[] = $dataRow;
+            $dataInputRow = array();
+            $dataInputRow[$customerAccountIdRowName] = $customerAccountId;
+            $dataInputRow[$paymentAmountRowName] = $paymentAmount;
+            $dataInputRow[$dateReceivedRowName] = $dateReceived;
+            $dataInputRow[$paymentMethodRowName] = $paymentMethod;
+            $dataInputRow[$bankAccountIdRowName] = $bankAccountId;
+            $dataInputRows[] = $dataInputRow;
         }
     }
     else{
@@ -111,25 +148,27 @@ while(($csvFileDataRow = fgetcsv($csvFileHandle)) !== FALSE){
     // INCREMENT ROW COUNTER
     $rowIndex++;
 }
-fclose($csvFileHandle);
+fclose($csvInputFileHandle);
 echo "data row stats\n";
 echo "\tread: " . $rowReadCount . "\n";
 
 // EXIT IF NOTHING READ
-if(count($dataRows) === 0){
-    exit("Error: no rows read\n");
+if(count($dataInputRows) === 0){
+    exit("Error: no rows input\n");
 }
 
 
-try {
-    // PROCESS EACH ROW
-    foreach($dataRows as $dataRow) {
+$dataInputSuccessRows = array();
+$dataInputFailureRows = array();
+// PROCESS EACH ROW
+foreach($dataInputRows as $dataInputRow) {
+    try {
         // CREATE NEW AR PAYMENT
-        $customerAccountId = $dataRow[$customerAccountIdRowName];
-        $paymentAmount = $dataRow[$paymentAmountRowName];
-        $dateReceived = $dataRow[$dateReceivedRowName];
-        $paymentMethod = $dataRow[$paymentMethodRowName];
-        $bankAccountId = $dataRow[$bankAccountIdRowName];
+        $customerAccountId = $dataInputRow[$customerAccountIdRowName];
+        $paymentAmount = $dataInputRow[$paymentAmountRowName];
+        $dateReceived = $dataInputRow[$dateReceivedRowName];
+        $paymentMethod = $dataInputRow[$paymentMethodRowName];
+        $bankAccountId = $dataInputRow[$bankAccountIdRowName];
         $arPaymentCreate = new ArPaymentCreate();
         $arPaymentCreate->setCustomerId($customerAccountId);
         $arPaymentCreate->setTransactionPaymentAmount($paymentAmount);
@@ -149,16 +188,63 @@ try {
             'Total count' => $result->getTotalCount(),
             'Data' => json_decode(json_encode($result->getData()), 1),
         ]);
+        // STORE ROW FOR OUTPUT
+        $dataInputSuccessRows[] = $dataInputRow;
+        // OUTPUT MESSAGE
+        echo "SUCCESS\n";
     }
-} catch (\Intacct\Exception\ResponseException $ex) {
-    $logger->error('An Intacct response exception was thrown', [
-        get_class($ex) => $ex->getMessage(),
-        'Errors' => $ex->getErrors(),
-    ]);
-    echo 'Failed! ' . $ex->getMessage();
-} catch (\Exception $ex) {
-    $logger->error('An exception was thrown', [
-        get_class($ex) => $ex->getMessage(),
-    ]);
-    echo get_class($ex) . ': ' . $ex->getMessage();
+    catch (\Intacct\Exception\ResponseException $ex) {
+        $logger->error('An Intacct response exception was thrown', [
+            get_class($ex) => $ex->getMessage(),
+            'Errors' => $ex->getErrors(),
+        ]);
+        // STORE ROW (WITH FAILURE INFO) FOR OUTPUT
+        $dataInputRow[$failureClassRowName] = get_class($ex);
+        $dataInputRow[$failureMessageRowName] = $ex->getMessage();
+        $dataInputRow[$failureErrorRowName] = $ex->getErrors();
+        $dataInputFailureRows[] = $dataInputRow;
+        // OUTPUT MESSAGE
+        echo 'FAILURE: ' . $ex->getMessage() . "\n";
+    }
+    catch (\Exception $ex) {
+        $logger->error('An exception was thrown', [
+            get_class($ex) => $ex->getMessage(),
+        ]);
+        // STORE ROW (WITH FAILURE INFO) FOR OUTPUT
+        $dataInputRow[$failureClassRowName] = get_class($ex);
+        $dataInputRow[$failureMessageRowName] = $ex->getMessage();
+        $dataInputRow[$failureErrorRowName] = '';
+        $dataInputFailureRows[] = $dataInputRow;
+        // OUTPUT MESSAGE
+        echo 'FAILURE: ' . get_class($ex) . ': ' . $ex->getMessage() . "\n";
+    }
+}
+
+// GENERATE DATA FOR FILE OUTPUT
+$dataInputRowNames = array();
+foreach($rowIndicesByRowName as $rowName=>$rowIndex){
+    $dataInputRowNames[] = $rowName;
+}
+
+// OUTPUT SUCCESS FILE
+fputcsv($csvOutputSuccessFileHandle, $dataInputRowNames);
+foreach($dataInputSuccessRows as $dataInputSuccessRow){
+    $orderedRow = array();
+    foreach($dataInputRowNames as $dataInputRowName){
+        $orderedRow[] = $dataInputSuccessRow[$dataInputRowName];
+    }
+    fputcsv($csvOutputSuccessFileHandle, $orderedRow);
+}
+
+// OUTPUT FAILURE FILE
+$dataInputRowNames[] = $failureClassRowName;
+$dataInputRowNames[] = $failureMessageRowName;
+$dataInputRowNames[] = $failureErrorRowName;
+fputcsv($csvOutputFailureFileHandle, $dataInputRowNames);
+foreach($dataInputFailureRows as $dataInputFailureRow){
+    $orderedRow = array();
+    foreach($dataInputRowNames as $dataInputRowName){
+        $orderedRow[] = $dataInputFailureRow[$dataInputRowName];
+    }
+    fputcsv($csvOutputFailureFileHandle, $orderedRow);
 }
