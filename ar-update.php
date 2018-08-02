@@ -27,6 +27,7 @@ $customerAccountIdRowName = 'customer_account_id';
 $dateReceivedRowName = 'date_received';
 $paymentMethodRowName = 'payment_method';
 $bankAccountIdRowName = 'bank_account_id';
+$undepositedFundsGlAccountNumberRowName = 'undeposited_funds_gi_account_number';
 $overpaymentLocationIdRowName = 'overpayment_location_id';
 $failureMessageRowName = 'failure_message';
 $failureClassRowName = 'failure_class';
@@ -101,27 +102,37 @@ for($i=0; $i<count($csvInputFileDataRow); $i++){
     else if($csvFileDataCell === $bankAccountIdRowName){
         $rowIndicesByRowName[$bankAccountIdRowName] = $i;
     }
+    else if($csvFileDataCell === $undepositedFundsGlAccountNumberRowName){
+        $rowIndicesByRowName[$undepositedFundsGlAccountNumberRowName] = $i;
+    }
     else if($csvFileDataCell === $overpaymentLocationIdRowName){
         $rowIndicesByRowName[$overpaymentLocationIdRowName] = $i;
     }
 }
+$errorColumn = NULL;
 if($rowIndicesByRowName[$paymentAmountRowName] === NULL){
-    exit('Error: unable to find column named: ' . $paymentAmountRowName . "\n");
+    $errorColumn = $paymentAmountRowName;
 }
 else if($rowIndicesByRowName[$customerAccountIdRowName] === NULL){
-    exit('Error: unable to find column named: ' . $customerAccountIdRowName . "\n");
+    $errorColumn = $customerAccountIdRowName;
 }
 else if($rowIndicesByRowName[$dateReceivedRowName] === NULL){
-    exit('Error: unable to find column named: ' . $dateReceivedRowName . "\n");
+    $errorColumn = $dateReceivedRowName;
 }
 else if($rowIndicesByRowName[$paymentMethodRowName] === NULL){
-    exit('Error: unable to find column named: ' . $paymentMethodRowName . "\n");
+    $errorColumn = $paymentMethodRowName;
 }
 else if($rowIndicesByRowName[$bankAccountIdRowName] === NULL){
-    exit('Error: unable to find column named: ' . $bankAccountIdRowName . "\n");
+    $errorColumn = $bankAccountIdRowName;
+}
+else if($rowIndicesByRowName[$undepositedFundsGlAccountNumberRowName] === NULL){
+    $errorColumn = $undepositedFundsGlAccountNumberRowName;
 }
 else if($rowIndicesByRowName[$overpaymentLocationIdRowName] === NULL){
-    exit('Error: unable to find column named: ' . $overpaymentLocationIdRowName . "\n");
+    $errorColumn = $overpaymentLocationIdRowName;
+}
+if($errorColumn != NULL){
+    exit('Error: unable to find column named: ' . $errorColumn . "\n");
 }
 
 // READ AND VALIDATE ROWS
@@ -134,30 +145,27 @@ while(($csvInputFileDataRow = fgetcsv($csvInputFileHandle)) !== FALSE){
     $dateReceived = trim($csvInputFileDataRow[$rowIndicesByRowName[$dateReceivedRowName]]);
     $paymentMethod = trim($csvInputFileDataRow[$rowIndicesByRowName[$paymentMethodRowName]]);
     $bankAccountId = trim($csvInputFileDataRow[$rowIndicesByRowName[$bankAccountIdRowName]]);
+    $undepositedFundsGlAccountNumber = trim($csvInputFileDataRow[$rowIndicesByRowName[$undepositedFundsGlAccountNumberRowName]]);
     $overpaymentLocationId = trim($csvInputFileDataRow[$rowIndicesByRowName[$overpaymentLocationIdRowName]]);
-    // VERIFY ALL FIELDS ARE NOT EMPTY
-    if(strlen($paymentAmount) > 0
-        && strlen($customerAccountId) > 0){
-        // VERIFY PAYMENT AMOUNT IS NUMERIC
-        if(!is_numeric($paymentAmount)){
-            exit('Error: payment amount is not a number, at row: ' . $rowIndex . "\n");
-        }
-        else{
-            $rowReadCount++;
-            // ADD ROW TO ROWS
-            $dataInputRow = array();
-            $dataInputRow[$customerAccountIdRowName] = $customerAccountId;
-            $dataInputRow[$paymentAmountRowName] = $paymentAmount;
-            $dataInputRow[$dateReceivedRowName] = $dateReceived;
-            $dataInputRow[$paymentMethodRowName] = $paymentMethod;
-            $dataInputRow[$bankAccountIdRowName] = $bankAccountId;
-            $dataInputRow[$overpaymentLocationIdRowName] = $overpaymentLocationId;
-            $dataInputRows[] = $dataInputRow;
-        }
+    // VALIDATE FIELDS
+    $errorMessage = NULL;
+    if(strlen($bankAccountId) > 0 && strlen($undepositedFundsGlAccountNumber) > 0){
+        $errorMessage = 'both ' . $bankAccountIdRowName . ' and ' . $undepositedFundsGlAccountNumberRowName . ' are specified, only specify one';
     }
-    else{
-        exit('Error: a field is empty, at row: ' + $rowIndex . "\n");
+    if($errorMessage != NULL){
+        exit('Error at row ' . $rowIndex . ': ' . $errorMessage . "\n");
     }
+    $rowReadCount++;
+    // ADD ROW TO ROWS
+    $dataInputRow = array();
+    $dataInputRow[$customerAccountIdRowName] = $customerAccountId;
+    $dataInputRow[$paymentAmountRowName] = $paymentAmount;
+    $dataInputRow[$dateReceivedRowName] = $dateReceived;
+    $dataInputRow[$paymentMethodRowName] = $paymentMethod;
+    $dataInputRow[$bankAccountIdRowName] = $bankAccountId;
+    $dataInputRow[$undepositedFundsGlAccountNumberRowName] = $undepositedFundsGlAccountNumber;
+    $dataInputRow[$overpaymentLocationIdRowName] = $overpaymentLocationId;
+    $dataInputRows[] = $dataInputRow;
     // INCREMENT ROW COUNTER
     $rowIndex++;
 }
@@ -181,13 +189,19 @@ foreach($dataInputRows as $dataInputRow) {
         $dateReceived = $dataInputRow[$dateReceivedRowName];
         $paymentMethod = $dataInputRow[$paymentMethodRowName];
         $bankAccountId = $dataInputRow[$bankAccountIdRowName];
+        $undepositedFundsGlAccountNumber = $dataInputRow[$undepositedFundsGlAccountNumberRowName];
         $overpaymentLocationId = $dataInputRow[$overpaymentLocationIdRowName];
         $arPaymentCreate = new ArPaymentCreate();
         $arPaymentCreate->setCustomerId($customerAccountId);
         $arPaymentCreate->setTransactionPaymentAmount($paymentAmount);
         $arPaymentCreate->setReceivedDate(new DateTime($dateReceived));
         $arPaymentCreate->setPaymentMethod(constant("Intacct\Functions\AccountsReceivable\ArPaymentCreate::$paymentMethod"));
-        $arPaymentCreate->setBankAccountId($bankAccountId);
+        if(strlen($bankAccountId) > 0){
+            $arPaymentCreate->setBankAccountId($bankAccountId);
+        }
+        if(strlen($undepositedFundsGlAccountNumber) > 0){
+            $arPaymentCreate->setUndepositedFundsGlAccountNo($undepositedFundsGlAccountNumber);
+        }
         if(strlen($overpaymentLocationId) > 0){
             $arPaymentCreate->setOverpaymentLocationId($overpaymentLocationId);
         }
