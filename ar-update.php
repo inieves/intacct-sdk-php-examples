@@ -39,12 +39,12 @@ $csvInputFilePath = NULL;
 $csvInputFileHandle = NULL;
 $csvInputFileDataRow = NULL;
 // OUTPUT SUCCESS FILE STATE
-$csvOutputSuccessFileNameTag = '_success';
+$csvOutputSuccessFileNameTag = '_s';
 $csvOutputSuccessFilePath = NULL;
 $csvOutputSuccessFileHandle = NULL;
 $csvOutputSuccessFileDataRow = NULL;
 // OUTPUT FAILURE FILE STATE
-$csvOutputFailureFileNameTag = '_failure';
+$csvOutputFailureFileNameTag = '_f';
 $csvOutputFailureFilePath = NULL;
 $csvOutputFailureFileHandle = NULL;
 $csvOutputFailureFileDataRow = NULL;
