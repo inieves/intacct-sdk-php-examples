@@ -1,21 +1,19 @@
 <?php
 
+// CREDENTIALS
 $sender_id = 'blackwalnutadvisors';
 $sender_password = 'JHb9W52;ja*+';
 $user_id = 'webservices_ian';
 $user_password = 'I3?k74AsYNp';
+
+// SET TIMEZONE
+date_default_timezone_set('America/Los_Angeles');
 
 $loader = require __DIR__ . '/vendor/autoload.php';
 
 use Intacct\OnlineClient;
 use Intacct\ClientConfig;
 use Intacct\Functions\AccountsReceivable\ArPaymentCreate;
-
-$handler = new \Monolog\Handler\StreamHandler(__DIR__ . '/logs/intacct.html');
-$handler->setFormatter(new \Monolog\Formatter\HtmlFormatter());
-
-$logger = new \Monolog\Logger('intacct-sdk-php-examples');
-$logger->pushHandler($handler);
 
 function authenticate($sender_id, $sender_password, $company_id, $user_id, $user_password, $logger){
     $clientConfig = new ClientConfig();
@@ -48,37 +46,53 @@ function getNewFilePath($originalFilePath, $additionalFileName){
     return $newFilePath;
 }
 
-// SET TIMEZONE
-date_default_timezone_set('America/Los_Angeles');
+function outputFile($fileHandle, $orderedConfigColumnNames, $orderedConfigSettingsRow, $orderedDataColumnNames, $dataRows){
+    fputcsv($fileHandle, $orderedConfigColumnNames);
+    fputcsv($fileHandle, $orderedConfigSettingsRow);
+    fputcsv($fileHandle, array());
+    $rowCount = 0;
+    fputcsv($fileHandle, $orderedDataColumnNames);
+    foreach($dataRows as $dataRow){
+        $orderedDataRow = array();
+        foreach($orderedDataColumnNames as $orderedDataColumnName){
+            $orderedDataRow[] = $dataRow[$orderedDataColumnName];
+        }
+        $rowCount++;
+        fputcsv($fileHandle, $orderedDataRow);
+    }
+    return $rowCount;
+}
 
-// CONFIG ROW NAMES
-$configCompanyIdRowName = 'company_id';
-$configRowNames = array($configCompanyIdRowName);
-// CONFIG ROW INDICES (IN INSERTION ORDER)
-$configRowIndicesByRowName = NULL;
+// CONFIG COLUMN NAMES
+$configCompanyIdColumnName = 'company_id';
+$configColumnNames = array($configCompanyIdColumnName);
+// CONFIG COLUMN INDICES (IN INSERTION ORDER)
+$configColumnIndicesByColumnName = NULL;
 // CONFIG ROWS
 $config = NULL;
 $configRow = NULL;
 
-// DATA ROW NAMES
-$dataPaymentAmountRowName = 'payment_amount';
-$dataCustomerAccountIdRowName = 'customer_account_id';
-$dataDateReceivedRowName = 'date_received';
-$dataPaymentMethodRowName = 'payment_method';
-$dataBankAccountIdRowName = 'bank_account_id';
-$dataUndepositedFundsGlAccountNumberRowName = 'undeposited_funds_gi_account_number';
-$dataOverpaymentLocationIdRowName = 'overpayment_location_id';
-$dataFailureMessageRowName = 'failure_message';
-$dataFailureClassRowName = 'failure_class';
-$dataFailureErrorRowName = 'failure_error';
-$dataTimestampRowName = 'time_stamp';
-$dataRowNames = array($dataPaymentAmountRowName, $dataCustomerAccountIdRowName, $dataDateReceivedRowName, $dataPaymentMethodRowName, $dataBankAccountIdRowName, $dataUndepositedFundsGlAccountNumberRowName, $dataOverpaymentLocationIdRowName);
-// DATA ROW INDICES (IN INSERTION ORDER)
-$dataRowIndicesByRowName = NULL;
+// DATA COLUMN NAMES
+$dataPaymentAmountColumnName = 'payment_amount';
+$dataCustomerAccountIdColumnName = 'customer_account_id';
+$dataDateReceivedColumnName = 'date_received';
+$dataPaymentMethodColumnName = 'payment_method';
+$dataBankAccountIdColumnName = 'bank_account_id';
+$dataUndepositedFundsGlAccountNumberColumnName = 'undeposited_funds_gi_account_number';
+$dataOverpaymentLocationIdColumnName = 'overpayment_location_id';
+$dataColumnNames = array($dataPaymentAmountColumnName, $dataCustomerAccountIdColumnName, $dataDateReceivedColumnName, $dataPaymentMethodColumnName, $dataBankAccountIdColumnName, $dataUndepositedFundsGlAccountNumberColumnName, $dataOverpaymentLocationIdColumnName);
+// INFO COLUMN NAMES
+$infoTimestampColumnName = 'time_stamp';
+$infoFailureMessageColumnName = 'failure_message';
+$infoFailureClassColumnName = 'failure_class';
+$infoFailureErrorColumnName = 'failure_error';
+$infoColumnNames = array($infoTimestampColumnName, $infoFailureMessageColumnName, $infoFailureClassColumnName, $infoFailureErrorColumnName);
+// DATA COLUMN INDICES (IN INSERTION ORDER)
+$dataColumnIndicesByColumnName = NULL;
 // DATA ROWS
 $dataInputRow = NULL;
 $dataInputRows = NULL;
-$dataInputRowNames = NULL;
+$dataInputColumnNames = NULL;
 $dataInputSuccessRows = NULL;
 $dataInputFailureRows = NULL;
 
@@ -124,9 +138,9 @@ if($csvOutputFailureFileHandle === FALSE){
     exit('Error: unable to open CSV output failure file for writing: (' . $csvOutputFailureFilePath . ")\n");
 }
 
-////////////
-// CONFIG //
-////////////
+//////////////////
+// CONFIG INPUT //
+//////////////////
 
 // GET FIRST CONFIG ROW (HEADER)
 $csvInputFileConfigRow = fgetcsv($csvInputFileHandle);
@@ -134,20 +148,20 @@ if($csvInputFileConfigRow === FALSE){
     exit("Error: unable to get first config row from CSV\n");
 }
 
-// GET CONFIG ROW INDICS
-$configRowIndicesByRowName = array();
+// GET CONFIG COLUMN INDICS
+$configColumnIndicesByColumnName = array();
 for($i=0; $i<count($csvInputFileConfigRow); $i++){
     $csvFileDataCell = trim($csvInputFileConfigRow[$i]);
-    foreach($configRowNames as $configRowName){
-        if($csvFileDataCell === $configRowName){
-            $configRowIndicesByRowName[$configRowName] = $i;
+    foreach($configColumnNames as $configColumnName){
+        if($csvFileDataCell === $configColumnName){
+            $configColumnIndicesByColumnName[$configColumnName] = $i;
         }
     }
 }
 $errorColumn = NULL;
-foreach($configRowNames as $configRowName){
-    if($configRowIndicesByRowName[$configRowName] === NULL){
-        $errorColumn = $configRowName;
+foreach($configColumnNames as $configColumnName){
+    if($configColumnIndicesByColumnName[$configColumnName] === NULL){
+        $errorColumn = $configColumnName;
         break;
     }
 }
@@ -158,22 +172,19 @@ if($errorColumn != NULL){
 // READ CONFIG SETTINGS ROW
 $configRow = fgetcsv($csvInputFileHandle);
 $config = array();
-$company_id = trim($configRow[$configRowIndicesByRowName[$configCompanyIdRowName]]);
-$config[$configCompanyIdRowName] = $company_id;
+$company_id = trim($configRow[$configColumnIndicesByColumnName[$configCompanyIdColumnName]]);
+$config[$configCompanyIdColumnName] = $company_id;
 
-//////////
-// MISC //
-//////////
-
-// AUTHENTICATE
-$client = authenticate($sender_id, $sender_password, $company_id, $user_id, $user_password, $logger);
+///////////
+// SPACE //
+///////////
 
 // GET BLANK ROW
 fgetcsv($csvInputFileHandle);
 
-//////////
-// DATA //
-//////////
+////////////////
+// DATA INPUT //
+////////////////
 
 // GET FIRST DATA ROW (HEADER)
 $csvInputFileDataRow = fgetcsv($csvInputFileHandle);
@@ -181,20 +192,20 @@ if($csvInputFileDataRow === FALSE){
     exit("Error: unable to get first data row from CSV\n");
 }
 
-// GET DATA ROW INDICES
-$dataRowIndicesByRowName = array();
+// GET DATA COLUMN INDICES
+$dataColumnIndicesByColumnName = array();
 for($i=0; $i<count($csvInputFileDataRow); $i++){
     $csvFileDataCell = trim($csvInputFileDataRow[$i]);
-    foreach($dataRowNames as $dataRowName){
-        if($csvFileDataCell === $dataRowName){
-            $dataRowIndicesByRowName[$dataRowName] = $i;
+    foreach($dataColumnNames as $dataColumnName){
+        if($csvFileDataCell === $dataColumnName){
+            $dataColumnIndicesByColumnName[$dataColumnName] = $i;
         }
     }
 }
 $errorColumn = NULL;
-foreach($dataRowNames as $dataRowName){
-    if($dataRowIndicesByRowName[$dataRowName] === NULL){
-        $errorColumn = $dataRowName;
+foreach($dataColumnNames as $dataColumnName){
+    if($dataColumnIndicesByColumnName[$dataColumnName] === NULL){
+        $errorColumn = $dataColumnName;
         break;
     }
 }
@@ -209,13 +220,13 @@ $dataInputRows = array();
 while(($csvInputFileDataRow = fgetcsv($csvInputFileHandle)) !== FALSE){
     // CREATE ROW
     $dataInputRow = array();
-    foreach($dataRowNames as $dataRowName){
-        $dataInputRow[$dataRowName] = trim($csvInputFileDataRow[$dataRowIndicesByRowName[$dataRowName]]);
+    foreach($dataColumnNames as $dataColumnName){
+        $dataInputRow[$dataColumnName] = trim($csvInputFileDataRow[$dataColumnIndicesByColumnName[$dataColumnName]]);
     }
     // VALIDATE
     $errorMessage = NULL;
-    if(strlen($dataInputRow[$dataBankAccountIdRowName]) > 0 && strlen($dataInputRow[$dataUndepositedFundsGlAccountNumberRowName]) > 0){
-        $errorMessage = 'both ' . $dataBankAccountIdRowName . ' and ' . $dataUndepositedFundsGlAccountNumberRowName . ' are specified, only specify one';
+    if(strlen($dataInputRow[$dataBankAccountIdColumnName]) > 0 && strlen($dataInputRow[$dataUndepositedFundsGlAccountNumberColumnName]) > 0){
+        $errorMessage = 'both ' . $dataBankAccountIdColumnName . ' and ' . $dataUndepositedFundsGlAccountNumberColumnName . ' are specified, only specify one';
     }
     if($errorMessage != NULL){
         exit('Error at row ' . $rowIndex . ': ' . $errorMessage . "\n");
@@ -234,19 +245,35 @@ if(count($dataInputRows) === 0){
     exit("Error: no rows input\n");
 }
 
+//////////////////
+// AUTHENTICATE //
+//////////////////
+
+$handler = new \Monolog\Handler\StreamHandler(__DIR__ . '/logs/intacct.html');
+$handler->setFormatter(new \Monolog\Formatter\HtmlFormatter());
+
+$logger = new \Monolog\Logger('intacct-sdk-php-examples');
+$logger->pushHandler($handler);
+
+$client = authenticate($sender_id, $sender_password, $company_id, $user_id, $user_password, $logger);
+
+///////////////////////
+// PUSH TRANSACTIONS //
+///////////////////////
+
 $dataInputSuccessRows = array();
 $dataInputFailureRows = array();
 // PROCESS EACH ROW
 foreach($dataInputRows as $dataInputRow) {
     try {
         // CREATE NEW AR PAYMENT
-        $customerAccountId = $dataInputRow[$dataCustomerAccountIdRowName];
-        $paymentAmount = $dataInputRow[$dataPaymentAmountRowName];
-        $dateReceived = $dataInputRow[$dataDateReceivedRowName];
-        $paymentMethod = $dataInputRow[$dataPaymentMethodRowName];
-        $bankAccountId = $dataInputRow[$dataBankAccountIdRowName];
-        $undepositedFundsGlAccountNumber = $dataInputRow[$dataUndepositedFundsGlAccountNumberRowName];
-        $overpaymentLocationId = $dataInputRow[$dataOverpaymentLocationIdRowName];
+        $customerAccountId = $dataInputRow[$dataCustomerAccountIdColumnName];
+        $paymentAmount = $dataInputRow[$dataPaymentAmountColumnName];
+        $dateReceived = $dataInputRow[$dataDateReceivedColumnName];
+        $paymentMethod = $dataInputRow[$dataPaymentMethodColumnName];
+        $bankAccountId = $dataInputRow[$dataBankAccountIdColumnName];
+        $undepositedFundsGlAccountNumber = $dataInputRow[$dataUndepositedFundsGlAccountNumberColumnName];
+        $overpaymentLocationId = $dataInputRow[$dataOverpaymentLocationIdColumnName];
         $arPaymentCreate = new ArPaymentCreate();
         $arPaymentCreate->setCustomerId($customerAccountId);
         $arPaymentCreate->setTransactionPaymentAmount($paymentAmount);
@@ -263,7 +290,7 @@ foreach($dataInputRows as $dataInputRow) {
         }
         // LOG TRANSACTION TIMESTAMP
         $timestamp = date('Y-m-d h:i:s a ') . date_default_timezone_get();
-        $dataInputRow[$dataTimestampRowName] = $timestamp;
+        $dataInputRow[$infoTimestampColumnName] = $timestamp;
         // EXECUTE
         $logger->info('Executing query to Intacct API');
         $response = $client->execute($arPaymentCreate);
@@ -288,13 +315,13 @@ foreach($dataInputRows as $dataInputRow) {
             'Errors' => $ex->getErrors(),
         ]);
         // STORE ROW (WITH FAILURE INFO) FOR OUTPUT
-        $dataInputRow[$dataFailureClassRowName] = get_class($ex);
-        $dataInputRow[$dataFailureMessageRowName] = $ex->getMessage();
-        $dataInputRow[$dataFailureErrorRowName] = print_r($ex->getErrors(), TRUE);
+        $dataInputRow[$infoFailureClassColumnName] = get_class($ex);
+        $dataInputRow[$infoFailureMessageColumnName] = $ex->getMessage();
+        $dataInputRow[$infoFailureErrorColumnName] = print_r($ex->getErrors(), TRUE);
         // REPLACE COMMAS
-        $dataInputRow[$dataFailureClassRowName] = str_replace(',', '.', $dataInputRow[$dataFailureClassRowName]);
-        $dataInputRow[$dataFailureMessageRowName] = str_replace(',', '.', $dataInputRow[$dataFailureMessageRowName]);
-        $dataInputRow[$dataFailureErrorRowName] = str_replace(',', '.', $dataInputRow[$dataFailureErrorRowName]);
+        $dataInputRow[$infoFailureClassColumnName] = str_replace(',', '.', $dataInputRow[$infoFailureClassColumnName]);
+        $dataInputRow[$infoFailureMessageColumnName] = str_replace(',', '.', $dataInputRow[$infoFailureMessageColumnName]);
+        $dataInputRow[$infoFailureErrorColumnName] = str_replace(',', '.', $dataInputRow[$infoFailureErrorColumnName]);
         $dataInputFailureRows[] = $dataInputRow;
         // OUTPUT MESSAGE
         echo 'f';
@@ -304,12 +331,12 @@ foreach($dataInputRows as $dataInputRow) {
             get_class($ex) => $ex->getMessage(),
         ]);
         // STORE ROW (WITH FAILURE INFO) FOR OUTPUT
-        $dataInputRow[$dataFailureClassRowName] = get_class($ex);
-        $dataInputRow[$dataFailureMessageRowName] = $ex->getMessage();
-        $dataInputRow[$dataFailureErrorRowName] = '';
+        $dataInputRow[$infoFailureClassColumnName] = get_class($ex);
+        $dataInputRow[$infoFailureMessageColumnName] = $ex->getMessage();
+        $dataInputRow[$infoFailureErrorColumnName] = '';
         // REPLACE COMMAS
-        $dataInputRow[$dataFailureClassRowName] = str_replace(',', '.', $dataInputRow[$dataFailureClassRowName]);
-        $dataInputRow[$dataFailureMessageRowName] = str_replace(',', '.', $dataInputRow[$dataFailureMessageRowName]);
+        $dataInputRow[$infoFailureClassColumnName] = str_replace(',', '.', $dataInputRow[$infoFailureClassColumnName]);
+        $dataInputRow[$infoFailureMessageColumnName] = str_replace(',', '.', $dataInputRow[$infoFailureMessageColumnName]);
         $dataInputFailureRows[] = $dataInputRow;
         // OUTPUT MESSAGE
         echo 'f';
@@ -318,52 +345,31 @@ foreach($dataInputRows as $dataInputRow) {
 
 echo "\n";
 
-// GENERATE CONFIG ROW NAMES AND SETTINGS
+//////////////////
+// OUTPUT FILES //
+//////////////////
+
+// GENERATE CONFIG COLUMN NAMES AND SETTINGS
 $orderedConfigSettingNames = array();
 $orderedConfigSettings = array();
-foreach($configRowIndicesByRowName as $rowName=>$rowIndex){
+foreach($configColumnIndicesByColumnName as $rowName=>$rowIndex){
     $orderedConfigSettingNames[] = $rowName;
     $orderedConfigSettings[] = $config[$rowName];
 }
-// GENERATE DATA ROW NAMES
-$dataInputRowNames = array();
-foreach($dataRowIndicesByRowName as $rowName=>$rowIndex){
-    $dataInputRowNames[] = $rowName;
+// GENERATE DATA AND INFO COLUMN NAMES
+$dataInputColumnNames = array();
+foreach($dataColumnIndicesByColumnName as $rowName=>$rowIndex){
+    $dataInputColumnNames[] = $rowName;
+}
+foreach($infoColumnNames as $infoColumnName){
+    $dataInputColumnNames[] = $infoColumnName;
 }
 
 // OUTPUT SUCCESS FILE
-fputcsv($csvOutputSuccessFileHandle, $orderedConfigSettingNames);
-fputcsv($csvOutputSuccessFileHandle, $orderedConfigSettings);
-fputcsv($csvOutputSuccessFileHandle, array());
-$uploadSuccessCount = 0;
-$dataInputRowNames[] = $dataTimestampRowName;
-fputcsv($csvOutputSuccessFileHandle, $dataInputRowNames);
-foreach($dataInputSuccessRows as $dataInputSuccessRow){
-    $orderedDataRow = array();
-    foreach($dataInputRowNames as $dataInputRowName){
-        $orderedDataRow[] = $dataInputSuccessRow[$dataInputRowName];
-    }
-    $uploadSuccessCount++;
-    fputcsv($csvOutputSuccessFileHandle, $orderedDataRow);
-}
+$uploadSuccessCount = outputFile($csvOutputSuccessFileHandle, $orderedConfigSettingNames, $orderedConfigSettings, $dataInputColumnNames, $dataInputSuccessRows);
 
 // OUTPUT FAILURE FILE
-fputcsv($csvOutputFailureFileHandle, $orderedConfigSettingNames);
-fputcsv($csvOutputFailureFileHandle, $orderedConfigSettings);
-fputcsv($csvOutputFailureFileHandle, array());
-$uploadFailureCount = 0;
-$dataInputRowNames[] = $dataFailureClassRowName;
-$dataInputRowNames[] = $dataFailureMessageRowName;
-$dataInputRowNames[] = $dataFailureErrorRowName;
-fputcsv($csvOutputFailureFileHandle, $dataInputRowNames);
-foreach($dataInputFailureRows as $dataInputFailureRow){
-    $orderedDataRow = array();
-    foreach($dataInputRowNames as $dataInputRowName){
-        $orderedDataRow[] = $dataInputFailureRow[$dataInputRowName];
-    }
-    $uploadFailureCount++;
-    fputcsv($csvOutputFailureFileHandle, $orderedDataRow);
-}
+$uploadFailureCount = outputFile($csvOutputFailureFileHandle, $orderedConfigSettingNames, $orderedConfigSettings, $dataInputColumnNames, $dataInputFailureRows);
 
 // OUTPUT RESULT COUNTS
 echo 'Upload Success Row Count: ' . $uploadSuccessCount . "\n";
