@@ -3,7 +3,7 @@
 $sender_id = 'blackwalnutadvisors';
 $sender_password = 'JHb9W52;ja*+';
 $user_id = 'webservices_ian';
-$user_password = '8M6D9az@myo';
+$user_password = 'I3?k74AsYNp';
 
 $loader = require __DIR__ . '/vendor/autoload.php';
 
@@ -203,7 +203,7 @@ if($errorColumn != NULL){
 }
 
 // READ AND VALIDATE DATA ROWS
-$rowIndex = 4;
+$rowIndex = 5;
 $rowReadCount = 0;
 $dataInputRows = array();
 while(($csvInputFileDataRow = fgetcsv($csvInputFileHandle)) !== FALSE){
