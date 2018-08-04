@@ -81,12 +81,6 @@ $dataBankAccountIdColumnName = 'bank_account_id';
 $dataUndepositedFundsGlAccountNumberColumnName = 'undeposited_funds_gi_account_number';
 $dataOverpaymentLocationIdColumnName = 'overpayment_location_id';
 $dataColumnNames = array($dataPaymentAmountColumnName, $dataCustomerAccountIdColumnName, $dataDateReceivedColumnName, $dataPaymentMethodColumnName, $dataBankAccountIdColumnName, $dataUndepositedFundsGlAccountNumberColumnName, $dataOverpaymentLocationIdColumnName);
-// INFO COLUMN NAMES
-$infoTimestampColumnName = 'time_stamp';
-$infoFailureMessageColumnName = 'failure_message';
-$infoFailureClassColumnName = 'failure_class';
-$infoFailureErrorColumnName = 'failure_error';
-$infoColumnNames = array($infoTimestampColumnName, $infoFailureMessageColumnName, $infoFailureClassColumnName, $infoFailureErrorColumnName);
 // DATA COLUMN INDICES (IN INSERTION ORDER)
 $dataColumnIndicesByColumnName = NULL;
 // DATA ROWS
@@ -95,6 +89,13 @@ $dataInputRows = NULL;
 $dataInputColumnNames = NULL;
 $dataInputSuccessRows = NULL;
 $dataInputFailureRows = NULL;
+
+// INFO COLUMN NAMES
+$infoTimestampColumnName = 'time_stamp';
+$infoFailureMessageColumnName = 'failure_message';
+$infoFailureClassColumnName = 'failure_class';
+$infoFailureErrorColumnName = 'failure_error';
+$infoColumnNames = array($infoTimestampColumnName, $infoFailureMessageColumnName, $infoFailureClassColumnName, $infoFailureErrorColumnName);
 
 // INPUT FILE STATE
 $csvInputFilePath = NULL;
