@@ -3,8 +3,7 @@
 // CREDENTIALS
 $sender_id = 'blackwalnutadvisors';
 $sender_password = 'JHb9W52;ja*+';
-$user_id = 'webservices_ian';
-$user_password = 'I3?k74AsYNp';
+$user_id = '87y9cw3wTwTDCQ';
 
 // SET TIMEZONE
 date_default_timezone_set('America/Los_Angeles');
@@ -65,7 +64,8 @@ function outputFile($fileHandle, $orderedConfigColumnNames, $orderedConfigSettin
 
 // CONFIG COLUMN NAMES
 $configCompanyIdColumnName = 'company_id';
-$configColumnNames = array($configCompanyIdColumnName);
+$configUserPasswordColumnName = 'user_password';
+$configColumnNames = array($configCompanyIdColumnName, $configUserPasswordColumnName);
 // CONFIG COLUMN INDICES (IN INSERTION ORDER)
 $configColumnIndicesByColumnName = NULL;
 // CONFIG ROWS
@@ -173,8 +173,9 @@ if($errorColumn != NULL){
 // READ CONFIG SETTINGS ROW
 $configRow = fgetcsv($csvInputFileHandle);
 $config = array();
-$company_id = trim($configRow[$configColumnIndicesByColumnName[$configCompanyIdColumnName]]);
-$config[$configCompanyIdColumnName] = $company_id;
+foreach($configColumnNames as $configColumnName){
+    $config[$configColumnName] = trim($configRow[$configColumnIndicesByColumnName[$configColumnName]]);
+}
 
 ///////////
 // SPACE //
@@ -256,6 +257,8 @@ $handler->setFormatter(new \Monolog\Formatter\HtmlFormatter());
 $logger = new \Monolog\Logger('intacct-sdk-php-examples');
 $logger->pushHandler($handler);
 
+$company_id = $config[$configCompanyIdColumnName];
+$user_password = $config[$configUserPasswordColumnName];
 $client = authenticate($sender_id, $sender_password, $company_id, $user_id, $user_password, $logger);
 
 ///////////////////////
@@ -357,11 +360,12 @@ foreach($configColumnIndicesByColumnName as $rowName=>$rowIndex){
     $orderedConfigSettingNames[] = $rowName;
     $orderedConfigSettings[] = $config[$rowName];
 }
-// GENERATE DATA AND INFO COLUMN NAMES
+// GENERATE DATA COLUMN NAMES
 $dataInputColumnNames = array();
 foreach($dataColumnIndicesByColumnName as $rowName=>$rowIndex){
     $dataInputColumnNames[] = $rowName;
 }
+// GENERATE INFO COLUMN NAMES
 foreach($infoColumnNames as $infoColumnName){
     $dataInputColumnNames[] = $infoColumnName;
 }
