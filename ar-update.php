@@ -1,12 +1,8 @@
 <?php
 
-// CREDENTIALS
-$sender_id = 'blackwalnutadvisors';
-$sender_password = 'JHb9W52;ja*+';
-$user_id = '87y9cw3wTwTDCQ';
-
-// SET TIMEZONE
-date_default_timezone_set('America/Los_Angeles');
+/////////////
+// INCLUDE //
+/////////////
 
 $loader = require __DIR__ . '/vendor/autoload.php';
 
@@ -14,63 +10,18 @@ use Intacct\OnlineClient;
 use Intacct\ClientConfig;
 use Intacct\Functions\AccountsReceivable\ArPaymentCreate;
 
-function authenticate($sender_id, $sender_password, $company_id, $user_id, $user_password, $logger){
-    $clientConfig = new ClientConfig();
-    $clientConfig->setSenderId($sender_id);
-    $clientConfig->setSenderPassword($sender_password);
-    $clientConfig->setCompanyId($company_id);
-    $clientConfig->setUserId($user_id);
-    $clientConfig->setUserPassword($user_password);
-    $clientConfig->setLogger($logger);
-    $client = new OnlineClient($clientConfig);
-    $formatter = new \Intacct\Logging\MessageFormatter(
-        '"{method} {target} HTTP/{version}" {code}'
-    );
-    $client->getConfig()->setLogLevel(\Psr\Log\LogLevel::INFO);
-    $client->getConfig()->setLogMessageFormatter($formatter);
-    return $client;
-}
+////////////
+// CONFIG //
+////////////
 
-function getNewFilePath($originalFilePath, $additionalFileName){
-    $originalFileName = basename($originalFilePath);
-    $dotPosition = strpos($originalFileName, '.');
-    $newFileName = '';
-    if($dotPosition === FALSE){
-        $newFileName = $originalFileName . $additionalFileName;
-    }
-    else{
-        $newFileName = substr_replace($originalFileName, $additionalFileName, $dotPosition, 0);
-    }
-    $newFilePath = substr($originalFilePath, 0, strlen($originalFilePath)-strlen($originalFileName)) . $newFileName;
-    return $newFilePath;
-}
-
-function outputFile($fileHandle, $orderedConfigColumnNames, $orderedConfigSettingsRow, $orderedDataColumnNames, $dataRows){
-    fputcsv($fileHandle, $orderedConfigColumnNames);
-    fputcsv($fileHandle, $orderedConfigSettingsRow);
-    fputcsv($fileHandle, array());
-    $rowCount = 0;
-    fputcsv($fileHandle, $orderedDataColumnNames);
-    foreach($dataRows as $dataRow){
-        $orderedDataRow = array();
-        foreach($orderedDataColumnNames as $orderedDataColumnName){
-            $orderedDataRow[] = $dataRow[$orderedDataColumnName];
-        }
-        $rowCount++;
-        fputcsv($fileHandle, $orderedDataRow);
-    }
-    return $rowCount;
-}
+// CREDENTIALS
+$sender_id = 'blackwalnutadvisors';
+$sender_password = 'JHb9W52;ja*+';
+$user_id = '87y9cw3wTwTDCQ';
 
 // CONFIG COLUMN NAMES
 $configCompanyIdColumnName = 'company_id';
 $configUserPasswordColumnName = 'user_password';
-$configColumnNames = array($configCompanyIdColumnName, $configUserPasswordColumnName);
-// CONFIG COLUMN INDICES (IN INSERTION ORDER)
-$configColumnIndicesByColumnName = NULL;
-// CONFIG ROWS
-$config = NULL;
-$configRow = NULL;
 
 // DATA COLUMN NAMES
 $dataPaymentAmountColumnName = 'payment_amount';
@@ -80,6 +31,44 @@ $dataPaymentMethodColumnName = 'payment_method';
 $dataBankAccountIdColumnName = 'bank_account_id';
 $dataUndepositedFundsGlAccountNumberColumnName = 'undeposited_funds_gi_account_number';
 $dataOverpaymentLocationIdColumnName = 'overpayment_location_id';
+
+// INFO COLUMN NAMES
+$infoTimestampColumnName = 'time_stamp';
+$infoFailureMessageColumnName = 'failure_message';
+$infoFailureClassColumnName = 'failure_class';
+$infoFailureErrorColumnName = 'failure_error';
+
+// OUTPUT FILES
+$csvOutputSuccessFileNameTag = '_s';
+$csvOutputFailureFileNameTag = '_f';
+
+// PROGRESS OUTPUT
+$successProgressOutput = 's';
+$failureProgressOutput = 'f';
+
+// TIMESTAMP
+$timestampFormat = 'Y-m-d h:i:s a ';
+
+// SET TIMEZONE
+date_default_timezone_set('America/Los_Angeles');
+
+// LOGGING
+$loggerName = 'intacct-sdk-php-examples';
+$logPath = '/logs/intacct.html';
+
+///////////
+// STATE //
+///////////
+
+// CONFIG COLUMNS
+$configColumnNames = array($configCompanyIdColumnName, $configUserPasswordColumnName);
+// CONFIG COLUMN INDICES (IN INSERTION ORDER)
+$configColumnIndicesByColumnName = NULL;
+// CONFIG ROWS
+$config = NULL;
+$configRow = NULL;
+
+// DATA COLUMNS
 $dataColumnNames = array($dataPaymentAmountColumnName, $dataCustomerAccountIdColumnName, $dataDateReceivedColumnName, $dataPaymentMethodColumnName, $dataBankAccountIdColumnName, $dataUndepositedFundsGlAccountNumberColumnName, $dataOverpaymentLocationIdColumnName);
 // DATA COLUMN INDICES (IN INSERTION ORDER)
 $dataColumnIndicesByColumnName = NULL;
@@ -90,11 +79,7 @@ $dataInputColumnNames = NULL;
 $dataInputSuccessRows = NULL;
 $dataInputFailureRows = NULL;
 
-// INFO COLUMN NAMES
-$infoTimestampColumnName = 'time_stamp';
-$infoFailureMessageColumnName = 'failure_message';
-$infoFailureClassColumnName = 'failure_class';
-$infoFailureErrorColumnName = 'failure_error';
+// INFO COLUMNS
 $infoColumnNames = array($infoTimestampColumnName, $infoFailureMessageColumnName, $infoFailureClassColumnName, $infoFailureErrorColumnName);
 
 // INPUT FILE STATE
@@ -103,12 +88,10 @@ $csvInputFileHandle = NULL;
 $csvInputFileDataRow = NULL;
 $csvInputFileConfigRow = NULL;
 // OUTPUT SUCCESS FILE STATE
-$csvOutputSuccessFileNameTag = '_s';
 $csvOutputSuccessFilePath = NULL;
 $csvOutputSuccessFileHandle = NULL;
 $csvOutputSuccessFileDataRow = NULL;
 // OUTPUT FAILURE FILE STATE
-$csvOutputFailureFileNameTag = '_f';
 $csvOutputFailureFilePath = NULL;
 $csvOutputFailureFileHandle = NULL;
 $csvOutputFailureFileDataRow = NULL;
@@ -149,33 +132,12 @@ if($csvInputFileConfigRow === FALSE){
     exit("Error: unable to get first config row from CSV\n");
 }
 
-// GET CONFIG COLUMN INDICS
-$configColumnIndicesByColumnName = array();
-for($i=0; $i<count($csvInputFileConfigRow); $i++){
-    $csvFileDataCell = trim($csvInputFileConfigRow[$i]);
-    foreach($configColumnNames as $configColumnName){
-        if($csvFileDataCell === $configColumnName){
-            $configColumnIndicesByColumnName[$configColumnName] = $i;
-        }
-    }
-}
-$errorColumn = NULL;
-foreach($configColumnNames as $configColumnName){
-    if($configColumnIndicesByColumnName[$configColumnName] === NULL){
-        $errorColumn = $configColumnName;
-        break;
-    }
-}
-if($errorColumn != NULL){
-    exit('Error: unable to find config column named: ' . $errorColumn . "\n");
-}
+// GET CONFIG COLUMN INDICES
+$configColumnIndicesByColumnName = getColumnIndicesByColumnName($csvInputFileConfigRow, $configColumnNames);
 
 // READ CONFIG SETTINGS ROW
 $configRow = fgetcsv($csvInputFileHandle);
-$config = array();
-foreach($configColumnNames as $configColumnName){
-    $config[$configColumnName] = trim($configRow[$configColumnIndicesByColumnName[$configColumnName]]);
-}
+$config = getRowGivenColumnNames($configRow, $configColumnIndicesByColumnName, $configColumnNames);
 
 ///////////
 // SPACE //
@@ -195,25 +157,7 @@ if($csvInputFileDataRow === FALSE){
 }
 
 // GET DATA COLUMN INDICES
-$dataColumnIndicesByColumnName = array();
-for($i=0; $i<count($csvInputFileDataRow); $i++){
-    $csvFileDataCell = trim($csvInputFileDataRow[$i]);
-    foreach($dataColumnNames as $dataColumnName){
-        if($csvFileDataCell === $dataColumnName){
-            $dataColumnIndicesByColumnName[$dataColumnName] = $i;
-        }
-    }
-}
-$errorColumn = NULL;
-foreach($dataColumnNames as $dataColumnName){
-    if($dataColumnIndicesByColumnName[$dataColumnName] === NULL){
-        $errorColumn = $dataColumnName;
-        break;
-    }
-}
-if($errorColumn != NULL){
-    exit('Error: unable to find data column named: ' . $errorColumn . "\n");
-}
+$dataColumnIndicesByColumnName = getColumnIndicesByColumnName($csvInputFileDataRow, $dataColumnNames);
 
 // READ AND VALIDATE DATA ROWS
 $rowIndex = 5;
@@ -221,10 +165,7 @@ $rowReadCount = 0;
 $dataInputRows = array();
 while(($csvInputFileDataRow = fgetcsv($csvInputFileHandle)) !== FALSE){
     // CREATE ROW
-    $dataInputRow = array();
-    foreach($dataColumnNames as $dataColumnName){
-        $dataInputRow[$dataColumnName] = trim($csvInputFileDataRow[$dataColumnIndicesByColumnName[$dataColumnName]]);
-    }
+    $dataInputRow = getRowGivenColumnNames($csvInputFileDataRow, $dataColumnIndicesByColumnName, $dataColumnNames);
     // VALIDATE
     $errorMessage = NULL;
     if(strlen($dataInputRow[$dataBankAccountIdColumnName]) > 0 && strlen($dataInputRow[$dataUndepositedFundsGlAccountNumberColumnName]) > 0){
@@ -251,10 +192,10 @@ if(count($dataInputRows) === 0){
 // AUTHENTICATE //
 //////////////////
 
-$handler = new \Monolog\Handler\StreamHandler(__DIR__ . '/logs/intacct.html');
+$handler = new \Monolog\Handler\StreamHandler(__DIR__ . $logPath);
 $handler->setFormatter(new \Monolog\Formatter\HtmlFormatter());
 
-$logger = new \Monolog\Logger('intacct-sdk-php-examples');
+$logger = new \Monolog\Logger($loggerName);
 $logger->pushHandler($handler);
 
 $company_id = $config[$configCompanyIdColumnName];
@@ -293,7 +234,7 @@ foreach($dataInputRows as $dataInputRow) {
             $arPaymentCreate->setOverpaymentLocationId($overpaymentLocationId);
         }
         // LOG TRANSACTION TIMESTAMP
-        $timestamp = date('Y-m-d h:i:s a ') . date_default_timezone_get();
+        $timestamp = date($timestampFormat) . date_default_timezone_get();
         $dataInputRow[$infoTimestampColumnName] = $timestamp;
         // EXECUTE
         $logger->info('Executing query to Intacct API');
@@ -311,7 +252,7 @@ foreach($dataInputRows as $dataInputRow) {
         // STORE ROW FOR OUTPUT
         $dataInputSuccessRows[] = $dataInputRow;
         // OUTPUT MESSAGE
-        echo 's';
+        echo $successProgressOutput;
     }
     catch (\Intacct\Exception\ResponseException $ex) {
         $logger->error('An Intacct response exception was thrown', [
@@ -328,7 +269,7 @@ foreach($dataInputRows as $dataInputRow) {
         $dataInputRow[$infoFailureErrorColumnName] = str_replace(',', '.', $dataInputRow[$infoFailureErrorColumnName]);
         $dataInputFailureRows[] = $dataInputRow;
         // OUTPUT MESSAGE
-        echo 'f';
+        echo $failureProgressOutput;
     }
     catch (\Exception $ex) {
         $logger->error('An exception was thrown', [
@@ -343,7 +284,7 @@ foreach($dataInputRows as $dataInputRow) {
         $dataInputRow[$infoFailureMessageColumnName] = str_replace(',', '.', $dataInputRow[$infoFailureMessageColumnName]);
         $dataInputFailureRows[] = $dataInputRow;
         // OUTPUT MESSAGE
-        echo 'f';
+        echo $failureProgressOutput;
     }
 }
 
@@ -355,10 +296,8 @@ echo "\n";
 
 // GENERATE CONFIG COLUMN NAMES AND SETTINGS
 $orderedConfigSettingNames = array();
-$orderedConfigSettings = array();
 foreach($configColumnIndicesByColumnName as $rowName=>$rowIndex){
     $orderedConfigSettingNames[] = $rowName;
-    $orderedConfigSettings[] = $config[$rowName];
 }
 // GENERATE DATA COLUMN NAMES
 $dataInputColumnNames = array();
@@ -371,12 +310,98 @@ foreach($infoColumnNames as $infoColumnName){
 }
 
 // OUTPUT SUCCESS FILE
-$uploadSuccessCount = outputFile($csvOutputSuccessFileHandle, $orderedConfigSettingNames, $orderedConfigSettings, $dataInputColumnNames, $dataInputSuccessRows);
+$uploadSuccessCount = outputFile($csvOutputSuccessFileHandle, $orderedConfigSettingNames, $config, $dataInputColumnNames, $dataInputSuccessRows);
 
 // OUTPUT FAILURE FILE
-$uploadFailureCount = outputFile($csvOutputFailureFileHandle, $orderedConfigSettingNames, $orderedConfigSettings, $dataInputColumnNames, $dataInputFailureRows);
+$uploadFailureCount = outputFile($csvOutputFailureFileHandle, $orderedConfigSettingNames, $config, $dataInputColumnNames, $dataInputFailureRows);
 
 // OUTPUT RESULT COUNTS
 echo 'Upload Success Row Count: ' . $uploadSuccessCount . "\n";
 echo 'Upload Failure Row Count: ' . $uploadFailureCount . "\n";
 
+///////////////
+// FUNCTIONS //
+///////////////
+
+function authenticate($sender_id, $sender_password, $company_id, $user_id, $user_password, $logger){
+    $clientConfig = new ClientConfig();
+    $clientConfig->setSenderId($sender_id);
+    $clientConfig->setSenderPassword($sender_password);
+    $clientConfig->setCompanyId($company_id);
+    $clientConfig->setUserId($user_id);
+    $clientConfig->setUserPassword($user_password);
+    $clientConfig->setLogger($logger);
+    $client = new OnlineClient($clientConfig);
+    $formatter = new \Intacct\Logging\MessageFormatter(
+        '"{method} {target} HTTP/{version}" {code}'
+    );
+    $client->getConfig()->setLogLevel(\Psr\Log\LogLevel::INFO);
+    $client->getConfig()->setLogMessageFormatter($formatter);
+    return $client;
+}
+
+function getNewFilePath($originalFilePath, $additionalFileName){
+    $originalFileName = basename($originalFilePath);
+    $dotPosition = strpos($originalFileName, '.');
+    $newFileName = '';
+    if($dotPosition === FALSE){
+        $newFileName = $originalFileName . $additionalFileName;
+    }
+    else{
+        $newFileName = substr_replace($originalFileName, $additionalFileName, $dotPosition, 0);
+    }
+    $newFilePath = substr($originalFilePath, 0, strlen($originalFilePath)-strlen($originalFileName)) . $newFileName;
+    return $newFilePath;
+}
+
+function getColumnIndicesByColumnName($csvInputFileRow, $columnNames){
+    $columnIndicesByColumnName = array();
+    for($i=0; $i<count($csvInputFileRow); $i++){
+        $csvFileDataCell = trim($csvInputFileRow[$i]);
+        foreach($columnNames as $columnName){
+            if($csvFileDataCell === $columnName){
+                $columnIndicesByColumnName[$columnName] = $i;
+            }
+        }
+    }
+    $errorColumn = NULL;
+    foreach($columnNames as $columnName){
+        if($columnIndicesByColumnName[$columnName] === NULL){
+            $errorColumn = $columnName;
+            break;
+        }
+    }
+    if($errorColumn != NULL){
+        exit('Error: unable to find column named: ' . $errorColumn . "\n");
+    }
+    return $columnIndicesByColumnName;
+}
+
+function getRowGivenColumnNames($rawRow, $columnIndicesByColumnName, $columnNames){
+    $row = array();
+    foreach($columnNames as $columnName){
+        $row[$columnName] = trim($rawRow[$columnIndicesByColumnName[$columnName]]);
+    }
+    return $row;
+}
+
+function outputFile($fileHandle, $orderedConfigColumnNames, $configRow, $orderedDataColumnNames, $dataRows){
+    fputcsv($fileHandle, $orderedConfigColumnNames);
+    $orderedConfigRow = array();
+    foreach($orderedConfigColumnNames as $orderedConfigColumnName){
+        $orderedConfigRow[] = $configRow[$orderedConfigColumnName];
+    }
+    fputcsv($fileHandle, $orderedConfigRow);
+    fputcsv($fileHandle, array());
+    $rowCount = 0;
+    fputcsv($fileHandle, $orderedDataColumnNames);
+    foreach($dataRows as $dataRow){
+        $orderedDataRow = array();
+        foreach($orderedDataColumnNames as $orderedDataColumnName){
+            $orderedDataRow[] = $dataRow[$orderedDataColumnName];
+        }
+        $rowCount++;
+        fputcsv($fileHandle, $orderedDataRow);
+    }
+    return $rowCount;
+}
