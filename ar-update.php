@@ -29,7 +29,7 @@ $dataCustomerAccountIdColumnName = 'customer_account_id';
 $dataDateReceivedColumnName = 'date_received';
 $dataPaymentMethodColumnName = 'payment_method';
 $dataBankAccountIdColumnName = 'bank_account_id';
-$dataUndepositedFundsGlAccountNumberColumnName = 'undeposited_funds_gi_account_number';
+$dataUndepositedFundsGlAccountNumberColumnName = 'undeposited_funds_gl_account_number';
 $dataOverpaymentLocationIdColumnName = 'overpayment_location_id';
 
 // INFO COLUMN NAMES
@@ -249,6 +249,10 @@ foreach($dataInputRows as $dataInputRow) {
             'Total count' => $result->getTotalCount(),
             'Data' => json_decode(json_encode($result->getData()), 1),
         ]);
+        // ADD FAILURE INFO TO ROW
+        $dataInputRow[$infoFailureClassColumnName] = '';
+        $dataInputRow[$infoFailureMessageColumnName] = '';
+        $dataInputRow[$infoFailureErrorColumnName] = '';
         // STORE ROW FOR OUTPUT
         $dataInputSuccessRows[] = $dataInputRow;
         // OUTPUT MESSAGE
@@ -259,7 +263,7 @@ foreach($dataInputRows as $dataInputRow) {
             get_class($ex) => $ex->getMessage(),
             'Errors' => $ex->getErrors(),
         ]);
-        // STORE ROW (WITH FAILURE INFO) FOR OUTPUT
+        // ADD FAILURE INFO TO ROW
         $dataInputRow[$infoFailureClassColumnName] = get_class($ex);
         $dataInputRow[$infoFailureMessageColumnName] = $ex->getMessage();
         $dataInputRow[$infoFailureErrorColumnName] = print_r($ex->getErrors(), TRUE);
@@ -267,6 +271,7 @@ foreach($dataInputRows as $dataInputRow) {
         $dataInputRow[$infoFailureClassColumnName] = str_replace(',', '.', $dataInputRow[$infoFailureClassColumnName]);
         $dataInputRow[$infoFailureMessageColumnName] = str_replace(',', '.', $dataInputRow[$infoFailureMessageColumnName]);
         $dataInputRow[$infoFailureErrorColumnName] = str_replace(',', '.', $dataInputRow[$infoFailureErrorColumnName]);
+        // STORE ROW FOR OUTPUT
         $dataInputFailureRows[] = $dataInputRow;
         // OUTPUT MESSAGE
         echo $failureProgressOutput;
@@ -275,13 +280,14 @@ foreach($dataInputRows as $dataInputRow) {
         $logger->error('An exception was thrown', [
             get_class($ex) => $ex->getMessage(),
         ]);
-        // STORE ROW (WITH FAILURE INFO) FOR OUTPUT
+        // ADD FAILURE INFO TO ROW
         $dataInputRow[$infoFailureClassColumnName] = get_class($ex);
         $dataInputRow[$infoFailureMessageColumnName] = $ex->getMessage();
         $dataInputRow[$infoFailureErrorColumnName] = '';
         // REPLACE COMMAS
         $dataInputRow[$infoFailureClassColumnName] = str_replace(',', '.', $dataInputRow[$infoFailureClassColumnName]);
         $dataInputRow[$infoFailureMessageColumnName] = str_replace(',', '.', $dataInputRow[$infoFailureMessageColumnName]);
+        // STORE ROW FOR OUTPUT
         $dataInputFailureRows[] = $dataInputRow;
         // OUTPUT MESSAGE
         echo $failureProgressOutput;
