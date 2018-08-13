@@ -9,6 +9,7 @@ $loader = require __DIR__ . '/vendor/autoload.php';
 use Intacct\OnlineClient;
 use Intacct\ClientConfig;
 use Intacct\Functions\AccountsReceivable\ArPaymentCreate;
+use Intacct\Functions\AccountsReceivable\ArPaymentItem;
 
 ////////////
 // CONFIG //
@@ -31,6 +32,11 @@ $dataPaymentMethodColumnName = 'payment_method';
 $dataBankAccountIdColumnName = 'bank_account_id';
 $dataUndepositedFundsGlAccountNumberColumnName = 'undeposited_funds_gl_account_number';
 $dataOverpaymentLocationIdColumnName = 'overpayment_location_id';
+$dataApplyToInvoiceKey = 'apply_to_invoice_key';
+$dataApplyToInvoiceAmount = 'apply_to_invoice_amount';
+
+// PAYMENT OBJECT NAME
+$paymentObjectName = 'payment';
 
 // INFO COLUMN NAMES
 $infoTimestampColumnName = 'time_stamp';
@@ -46,8 +52,9 @@ $csvOutputFailureFileNameTag = '_f';
 $successProgressOutput = 's';
 $failureProgressOutput = 'f';
 
-// TIMESTAMP
+// FORMATS
 $timestampFormat = 'Y-m-d h:i:s a ';
+$dateReceivedFormat = 'Y-m-d';
 
 // SET TIMEZONE
 date_default_timezone_set('America/Los_Angeles');
@@ -69,7 +76,7 @@ $config = NULL;
 $configRow = NULL;
 
 // DATA COLUMNS
-$dataColumnNames = array($dataPaymentAmountColumnName, $dataCustomerAccountIdColumnName, $dataDateReceivedColumnName, $dataPaymentMethodColumnName, $dataBankAccountIdColumnName, $dataUndepositedFundsGlAccountNumberColumnName, $dataOverpaymentLocationIdColumnName);
+$dataColumnNames = array($dataPaymentAmountColumnName, $dataCustomerAccountIdColumnName, $dataDateReceivedColumnName, $dataPaymentMethodColumnName, $dataBankAccountIdColumnName, $dataUndepositedFundsGlAccountNumberColumnName, $dataOverpaymentLocationIdColumnName, $dataApplyToInvoiceKey, $dataApplyToInvoiceAmount);
 // DATA COLUMN INDICES (IN INSERTION ORDER)
 $dataColumnIndicesByColumnName = NULL;
 // DATA ROWS
@@ -96,30 +103,20 @@ $csvOutputFailureFilePath = NULL;
 $csvOutputFailureFileHandle = NULL;
 $csvOutputFailureFileDataRow = NULL;
 
-///////////
-// FILES //
-///////////
+/////////////////
+// INPUT FILES //
+/////////////////
 
 // GET FILE PATHS
 if(count($argv) !== 2){
     exit("Error: missing CSV file path\n");
 }
 $csvInputFilePath = $argv[1];
-$csvOutputSuccessFilePath = getNewFilePath($csvInputFilePath, $csvOutputSuccessFileNameTag);
-$csvOutputFailureFilePath = getNewFilePath($csvInputFilePath, $csvOutputFailureFileNameTag);
 
 // GET FILE HANDLES
 $csvInputFileHandle = @fopen($csvInputFilePath, 'r');
 if($csvInputFileHandle === FALSE){
     exit('Error: unable to open CSV input file for reading (' . $csvInputFilePath . ")\n");
-}
-$csvOutputSuccessFileHandle = @fopen($csvOutputSuccessFilePath, 'w');
-if($csvOutputSuccessFileHandle === FALSE){
-    exit('Error: unable to open CSV output success file for writing: (' . $csvOutputSuccessFilePath . ")\n");
-}
-$csvOutputFailureFileHandle = @fopen($csvOutputFailureFilePath, 'w');
-if($csvOutputFailureFileHandle === FALSE){
-    exit('Error: unable to open CSV output failure file for writing: (' . $csvOutputFailureFilePath . ")\n");
 }
 
 //////////////////
@@ -168,7 +165,7 @@ while(($csvInputFileDataRow = fgetcsv($csvInputFileHandle)) !== FALSE){
     $dataInputRow = getRowGivenColumnNames($csvInputFileDataRow, $dataColumnIndicesByColumnName, $dataColumnNames);
     // VALIDATE
     $errorMessage = NULL;
-    if(strlen($dataInputRow[$dataBankAccountIdColumnName]) > 0 && strlen($dataInputRow[$dataUndepositedFundsGlAccountNumberColumnName]) > 0){
+    if(!empty($dataInputRow[$dataBankAccountIdColumnName]) && !empty($dataInputRow[$dataUndepositedFundsGlAccountNumberColumnName])){
         $errorMessage = 'both ' . $dataBankAccountIdColumnName . ' and ' . $dataUndepositedFundsGlAccountNumberColumnName . ' are specified, only specify one';
     }
     if($errorMessage != NULL){
@@ -188,6 +185,24 @@ if(count($dataInputRows) === 0){
     exit("Error: no rows input\n");
 }
 
+
+//////////////////
+// OUTPUT FILES //
+//////////////////
+
+$csvOutputSuccessFilePath = getNewFilePath($csvInputFilePath, $csvOutputSuccessFileNameTag);
+$csvOutputFailureFilePath = getNewFilePath($csvInputFilePath, $csvOutputFailureFileNameTag);
+
+// GET FILE HANDLES
+$csvOutputSuccessFileHandle = @fopen($csvOutputSuccessFilePath, 'w');
+if($csvOutputSuccessFileHandle === FALSE){
+    exit('Error: unable to open CSV output success file for writing: (' . $csvOutputSuccessFilePath . ")\n");
+}
+$csvOutputFailureFileHandle = @fopen($csvOutputFailureFilePath, 'w');
+if($csvOutputFailureFileHandle === FALSE){
+    exit('Error: unable to open CSV output failure file for writing: (' . $csvOutputFailureFilePath . ")\n");
+}
+
 //////////////////
 // AUTHENTICATE //
 //////////////////
@@ -202,43 +217,85 @@ $company_id = $config[$configCompanyIdColumnName];
 $user_password = $config[$configUserPasswordColumnName];
 $client = authenticate($sender_id, $sender_password, $company_id, $user_id, $user_password, $logger);
 
-///////////////////////
-// PUSH TRANSACTIONS //
-///////////////////////
+/////////////////////
+// PARSE DATA ROWS //
+/////////////////////
 
-$dataInputSuccessRows = array();
-$dataInputFailureRows = array();
-// PROCESS EACH ROW
+$lastArPayment = NULL;
+$arPayments = array();
+
 foreach($dataInputRows as $dataInputRow) {
+    // CHECK IF ROW IS JUST PAYMENT ITEM FIELDS OR A FULL PAYMENT
+    $bothPaymentItemFieldsSpecified = TRUE;
+    $someNonPaymentItemFieldSpecified = FALSE;
+    foreach($dataColumnNames as $dataColumnName){
+        if($dataColumnName === $dataApplyToInvoiceKey
+            || $dataColumnName === $dataApplyToInvoiceAmount){
+            if(empty($dataInputRow[$dataColumnName])){
+                $bothPaymentItemFieldsSpecified = FALSE;
+            }
+        }
+        else{
+            if(!empty($dataInputRow[$dataColumnName])){
+                $someNonPaymentItemFieldSpecified = TRUE;
+            }
+        }
+    }
+    // GET ROWS
+    $customerAccountId = $dataInputRow[$dataCustomerAccountIdColumnName];
+    $paymentAmount = $dataInputRow[$dataPaymentAmountColumnName];
+    $dateReceived = $dataInputRow[$dataDateReceivedColumnName];
+    $paymentMethod = $dataInputRow[$dataPaymentMethodColumnName];
+    $bankAccountId = $dataInputRow[$dataBankAccountIdColumnName];
+    $undepositedFundsGlAccountNumber = $dataInputRow[$dataUndepositedFundsGlAccountNumberColumnName];
+    $overpaymentLocationId = $dataInputRow[$dataOverpaymentLocationIdColumnName];
+    $applyToInvoiceKey = $dataInputRow[$dataApplyToInvoiceKey];
+    $applyToInvoiceAmount = $dataInputRow[$dataApplyToInvoiceAmount];
+    // HANDLE JUST PAYMENT ITEM
+    if($bothPaymentItemFieldsSpecified && !$someNonPaymentItemFieldSpecified && $lastArPayment!=NULL){
+        //echo "B\n";
+        addArPaymentItemToArPayment($lastArPayment, $applyToInvoiceKey, $applyToInvoiceAmount);
+    }
+    // HANDLE FULL PAYMENT
+    else{
+        $arPayment = new ArPaymentCreate();
+        $arPayment->setCustomerId($customerAccountId);
+        $arPayment->setTransactionPaymentAmount($paymentAmount);
+        $arPayment->setReceivedDate(new DateTime($dateReceived));
+        $arPayment->setPaymentMethod(constant("Intacct\Functions\AccountsReceivable\ArPaymentCreate::$paymentMethod"));
+        if(!empty($bankAccountId)){
+            $arPayment->setBankAccountId($bankAccountId);
+        }
+        if(!empty($undepositedFundsGlAccountNumber)){
+            $arPayment->setUndepositedFundsGlAccountNo($undepositedFundsGlAccountNumber);
+        }
+        if(!empty($overpaymentLocationId)){
+            $arPayment->setOverpaymentLocationId($overpaymentLocationId);
+        }
+        if($bothPaymentItemFieldsSpecified){
+            //echo "A\n";
+            addArPaymentItemToArPayment($arPayment, $applyToInvoiceKey, $applyToInvoiceAmount);
+        }
+        // UPDATE LAST PAYMENT
+        $lastArPayment = $arPayment;
+        // RECORD PAYMENT
+        $arPayments[] = $arPayment;
+    }
+}
+
+//////////////////////
+// PROCESS PAYMENTS //
+//////////////////////
+
+$successObjects = array();
+$failureObjects = array();
+foreach($arPayments as $arPayment) {
+    // LOG TRANSACTION TIMESTAMP
+    $timestamp = date($timestampFormat) . date_default_timezone_get();
     try {
-        // CREATE NEW AR PAYMENT
-        $customerAccountId = $dataInputRow[$dataCustomerAccountIdColumnName];
-        $paymentAmount = $dataInputRow[$dataPaymentAmountColumnName];
-        $dateReceived = $dataInputRow[$dataDateReceivedColumnName];
-        $paymentMethod = $dataInputRow[$dataPaymentMethodColumnName];
-        $bankAccountId = $dataInputRow[$dataBankAccountIdColumnName];
-        $undepositedFundsGlAccountNumber = $dataInputRow[$dataUndepositedFundsGlAccountNumberColumnName];
-        $overpaymentLocationId = $dataInputRow[$dataOverpaymentLocationIdColumnName];
-        $arPaymentCreate = new ArPaymentCreate();
-        $arPaymentCreate->setCustomerId($customerAccountId);
-        $arPaymentCreate->setTransactionPaymentAmount($paymentAmount);
-        $arPaymentCreate->setReceivedDate(new DateTime($dateReceived));
-        $arPaymentCreate->setPaymentMethod(constant("Intacct\Functions\AccountsReceivable\ArPaymentCreate::$paymentMethod"));
-        if(strlen($bankAccountId) > 0){
-            $arPaymentCreate->setBankAccountId($bankAccountId);
-        }
-        if(strlen($undepositedFundsGlAccountNumber) > 0){
-            $arPaymentCreate->setUndepositedFundsGlAccountNo($undepositedFundsGlAccountNumber);
-        }
-        if(strlen($overpaymentLocationId) > 0){
-            $arPaymentCreate->setOverpaymentLocationId($overpaymentLocationId);
-        }
-        // LOG TRANSACTION TIMESTAMP
-        $timestamp = date($timestampFormat) . date_default_timezone_get();
-        $dataInputRow[$infoTimestampColumnName] = $timestamp;
         // EXECUTE
         $logger->info('Executing query to Intacct API');
-        $response = $client->execute($arPaymentCreate);
+        $response = $client->execute($arPayment);
         $result = $response->getResult();
         // LOG RESULT
         $logger->debug('Query successful', [
@@ -249,12 +306,16 @@ foreach($dataInputRows as $dataInputRow) {
             'Total count' => $result->getTotalCount(),
             'Data' => json_decode(json_encode($result->getData()), 1),
         ]);
-        // ADD FAILURE INFO TO ROW
-        $dataInputRow[$infoFailureClassColumnName] = '';
-        $dataInputRow[$infoFailureMessageColumnName] = '';
-        $dataInputRow[$infoFailureErrorColumnName] = '';
-        // STORE ROW FOR OUTPUT
-        $dataInputSuccessRows[] = $dataInputRow;
+        // CREATE OBJECT FOR OUTPUT
+        $successObject = array();
+        $successObject[$paymentObjectName] = $arPayment;
+        $successObject[$infoTimestampColumnName] = $timestamp;
+        // ADD FAILURE INFO TO OBJECT
+        $successObject[$infoFailureClassColumnName] = '';
+        $successObject[$infoFailureMessageColumnName] = '';
+        $successObject[$infoFailureErrorColumnName] = '';
+        // STORE OBJECT FOR OUTPUT
+        $successObjects[] = $successObject;
         // OUTPUT MESSAGE
         echo $successProgressOutput;
     }
@@ -263,16 +324,20 @@ foreach($dataInputRows as $dataInputRow) {
             get_class($ex) => $ex->getMessage(),
             'Errors' => $ex->getErrors(),
         ]);
-        // ADD FAILURE INFO TO ROW
-        $dataInputRow[$infoFailureClassColumnName] = get_class($ex);
-        $dataInputRow[$infoFailureMessageColumnName] = $ex->getMessage();
-        $dataInputRow[$infoFailureErrorColumnName] = print_r($ex->getErrors(), TRUE);
+        // CREATE OBJECT FOR OUTPUT
+        $failureObject = array();
+        $failureObject[$paymentObjectName] = $arPayment;
+        $failureObject[$infoTimestampColumnName] = $timestamp;
+        // ADD FAILURE INFO TO OBJECT
+        $failureObject[$infoFailureClassColumnName] = get_class($ex);
+        $failureObject[$infoFailureMessageColumnName] = $ex->getMessage();
+        $failureObject[$infoFailureErrorColumnName] = print_r($ex->getErrors(), TRUE);
         // REPLACE COMMAS
-        $dataInputRow[$infoFailureClassColumnName] = str_replace(',', '.', $dataInputRow[$infoFailureClassColumnName]);
-        $dataInputRow[$infoFailureMessageColumnName] = str_replace(',', '.', $dataInputRow[$infoFailureMessageColumnName]);
-        $dataInputRow[$infoFailureErrorColumnName] = str_replace(',', '.', $dataInputRow[$infoFailureErrorColumnName]);
-        // STORE ROW FOR OUTPUT
-        $dataInputFailureRows[] = $dataInputRow;
+        $failureObject[$infoFailureClassColumnName] = str_replace(',', '.', $failureObject[$infoFailureClassColumnName]);
+        $failureObject[$infoFailureMessageColumnName] = str_replace(',', '.', $failureObject[$infoFailureMessageColumnName]);
+        $failureObject[$infoFailureErrorColumnName] = str_replace(',', '.', $failureObject[$infoFailureErrorColumnName]);
+        // STORE OBJECT FOR OUTPUT
+        $failureObjects[] = $failureObject;
         // OUTPUT MESSAGE
         echo $failureProgressOutput;
     }
@@ -280,15 +345,19 @@ foreach($dataInputRows as $dataInputRow) {
         $logger->error('An exception was thrown', [
             get_class($ex) => $ex->getMessage(),
         ]);
-        // ADD FAILURE INFO TO ROW
-        $dataInputRow[$infoFailureClassColumnName] = get_class($ex);
-        $dataInputRow[$infoFailureMessageColumnName] = $ex->getMessage();
-        $dataInputRow[$infoFailureErrorColumnName] = '';
+        // CREATE OBJECT FOR OUTPUT
+        $failureObject = array();
+        $failureObject[$paymentObjectName] = $arPayment;
+        $failureObject[$infoTimestampColumnName] = $timestamp;
+        // ADD FAILURE INFO TO OBJECT
+        $failureObject[$infoFailureClassColumnName] = get_class($ex);
+        $failureObject[$infoFailureMessageColumnName] = $ex->getMessage();
+        $failureObject[$infoFailureErrorColumnName] = '';
         // REPLACE COMMAS
-        $dataInputRow[$infoFailureClassColumnName] = str_replace(',', '.', $dataInputRow[$infoFailureClassColumnName]);
-        $dataInputRow[$infoFailureMessageColumnName] = str_replace(',', '.', $dataInputRow[$infoFailureMessageColumnName]);
-        // STORE ROW FOR OUTPUT
-        $dataInputFailureRows[] = $dataInputRow;
+        $failureObject[$infoFailureClassColumnName] = str_replace(',', '.', $failureObject[$infoFailureClassColumnName]);
+        $failureObject[$infoFailureMessageColumnName] = str_replace(',', '.', $failureObject[$infoFailureMessageColumnName]);
+        // STORE OBJECT FOR OUTPUT
+        $failureObjects[] = $failureObject;
         // OUTPUT MESSAGE
         echo $failureProgressOutput;
     }
@@ -310,20 +379,16 @@ $dataInputColumnNames = array();
 foreach($dataColumnIndicesByColumnName as $rowName=>$rowIndex){
     $dataInputColumnNames[] = $rowName;
 }
-// GENERATE INFO COLUMN NAMES
-foreach($infoColumnNames as $infoColumnName){
-    $dataInputColumnNames[] = $infoColumnName;
-}
 
 // OUTPUT SUCCESS FILE
-$uploadSuccessCount = outputFile($csvOutputSuccessFileHandle, $orderedConfigSettingNames, $config, $dataInputColumnNames, $dataInputSuccessRows);
+$uploadSuccessCount = outputFile($csvOutputSuccessFileHandle, $orderedConfigSettingNames, $config, $dataInputColumnNames, $infoColumnNames, $successObjects);
 
 // OUTPUT FAILURE FILE
-$uploadFailureCount = outputFile($csvOutputFailureFileHandle, $orderedConfigSettingNames, $config, $dataInputColumnNames, $dataInputFailureRows);
+$uploadFailureCount = outputFile($csvOutputFailureFileHandle, $orderedConfigSettingNames, $config, $dataInputColumnNames, $infoColumnNames, $failureObjects);
 
 // OUTPUT RESULT COUNTS
-echo 'Upload Success Row Count: ' . $uploadSuccessCount . "\n";
-echo 'Upload Failure Row Count: ' . $uploadFailureCount . "\n";
+echo 'Upload Success Count: ' . $uploadSuccessCount . "\n";
+echo 'Upload Failure Count: ' . $uploadFailureCount . "\n";
 
 ///////////////
 // FUNCTIONS //
@@ -391,23 +456,95 @@ function getRowGivenColumnNames($rawRow, $columnIndicesByColumnName, $columnName
     return $row;
 }
 
-function outputFile($fileHandle, $orderedConfigColumnNames, $configRow, $orderedDataColumnNames, $dataRows){
+function outputFile($fileHandle, $orderedConfigColumnNames, $configRow, $orderedDataColumnNames, $infoColumnNames, $dataObjects){
+    global $dateReceivedFormat, $paymentObjectName, $dataCustomerAccountIdColumnName, $dataPaymentAmountColumnName, $dataDateReceivedColumnName, $dataPaymentMethodColumnName, $dataBankAccountIdColumnName, $dataUndepositedFundsGlAccountNumberColumnName, $dataOverpaymentLocationIdColumnName, $dataApplyToInvoiceKey, $dataApplyToInvoiceAmount;
+    // OUTPUT CONFIG HEADER
     fputcsv($fileHandle, $orderedConfigColumnNames);
+    // OUTPUT CONFIG SETTINGS
     $orderedConfigRow = array();
     foreach($orderedConfigColumnNames as $orderedConfigColumnName){
         $orderedConfigRow[] = $configRow[$orderedConfigColumnName];
     }
     fputcsv($fileHandle, $orderedConfigRow);
+    // OUTPUT BLANK ROW
     fputcsv($fileHandle, array());
-    $rowCount = 0;
-    fputcsv($fileHandle, $orderedDataColumnNames);
-    foreach($dataRows as $dataRow){
-        $orderedDataRow = array();
-        foreach($orderedDataColumnNames as $orderedDataColumnName){
-            $orderedDataRow[] = $dataRow[$orderedDataColumnName];
+    // OUTPUT DATA HEADER
+    $orderedDataAndInfoColumnNames = array_merge($orderedDataColumnNames, $infoColumnNames);
+    fputcsv($fileHandle, $orderedDataAndInfoColumnNames);
+    // OUTPUT DATA ROWS
+    $objectCount = 0;
+    foreach($dataObjects as $dataObject){
+        // GET OBJECT FIELDS
+        $arPaymentFields = array();
+        $arPaymentFields[$dataCustomerAccountIdColumnName] = $dataObject[$paymentObjectName]->getCustomerId();
+        $arPaymentFields[$dataPaymentAmountColumnName] = $dataObject[$paymentObjectName]->getTransactionPaymentAmount();
+        $arPaymentFields[$dataDateReceivedColumnName] = $dataObject[$paymentObjectName]->getReceivedDate()->format($dateReceivedFormat);
+        $arPaymentFields[$dataPaymentMethodColumnName] = getPaymentMentodConstantFromString($dataObject[$paymentObjectName]->getPaymentMethod());
+        $arPaymentFields[$dataBankAccountIdColumnName] = $dataObject[$paymentObjectName]->getBankAccountId();
+        $arPaymentFields[$dataUndepositedFundsGlAccountNumberColumnName] = $dataObject[$paymentObjectName]->getUndepositedFundsGlAccountNo();
+        $arPaymentFields[$dataOverpaymentLocationIdColumnName] = $dataObject[$paymentObjectName]->getOverpaymentLocationId();
+        $arPaymentApplyToTransactions = $dataObject[$paymentObjectName]->getApplyToTransactions();
+        if(empty($arPaymentApplyToTransactions)){
+            $arPaymentFields[$dataApplyToInvoiceKey] = '';
+            $arPaymentFields[$dataApplyToInvoiceAmount] = '';
         }
-        $rowCount++;
-        fputcsv($fileHandle, $orderedDataRow);
+        else{
+            $firstPaymentItem = array_shift($arPaymentApplyToTransactions);
+            $arPaymentFields[$dataApplyToInvoiceKey] = $firstPaymentItem->getApplyToRecordId();
+            $arPaymentFields[$dataApplyToInvoiceAmount] = $firstPaymentItem->getAmountToApply();
+        }
+        // BUILD ORDERED TRANSACTION ROW
+        $orderedTransactionRow = array();
+        foreach($orderedDataColumnNames as $orderedDataColumnName){
+            $orderedTransactionRow[] = $arPaymentFields[$orderedDataColumnName];
+        }
+        foreach($infoColumnNames as $infoColumnName){
+            $orderedTransactionRow[] = $dataObject[$infoColumnName];
+        }
+        fputcsv($fileHandle, $orderedTransactionRow);
+        $objectCount++;
+        // BUILD ORDERED ADDITIONAL PAYMENT ITEM ROWS
+        while(!empty($arPaymentApplyToTransactions)){
+            $orderedAdditionalPaymentItemRow = array();
+            $additionalPaymentItem = array_shift($arPaymentApplyToTransactions);
+            foreach($orderedDataColumnNames as $orderedDataColumnName){
+                if($orderedDataColumnName === $dataApplyToInvoiceKey){
+                    $orderedAdditionalPaymentItemRow[] = $additionalPaymentItem->getApplyToRecordId();
+                }
+                else if($orderedDataColumnName === $dataApplyToInvoiceAmount){
+                    $orderedAdditionalPaymentItemRow[] = $additionalPaymentItem->getAmountToApply();
+                }
+                else{
+                    $orderedAdditionalPaymentItemRow[] = '';
+                }
+            }
+            foreach($infoColumnNames as $infoColumnName){
+                $orderedAdditionalPaymentItemRow[] = '';
+            }
+            fputcsv($fileHandle, $orderedAdditionalPaymentItemRow);
+        }
     }
-    return $rowCount;
+    return $objectCount;
+}
+
+function addArPaymentItemToArPayment($arPayment, $invoiceKey, $invoiceAmount){
+    $arPaymentItem = new ArPaymentItem();
+    $arPaymentItem->setApplyToRecordId($invoiceKey);
+    $arPaymentItem->setAmountToApply($invoiceAmount);
+    $applyToTransactions = $arPayment->getApplyToTransactions();
+    $applyToTransactions[] = $arPaymentItem;
+    $arPayment->setApplyToTransactions($applyToTransactions);
+}
+
+function getPaymentMentodConstantFromString($s){
+    switch($s){
+        case 'Printed Check': return 'PAYMENT_METHOD_CHECK';
+        case 'Cash': return 'PAYMENT_METHOD_CASH';
+        case 'EFT': return 'PAYMENT_METHOD_RECORD_TRANSFER';
+        case 'Credit Card': return 'PAYMENT_METHOD_CREDIT_CARD';
+        case 'Online': return 'PAYMENT_METHOD_ONLINE';
+        case 'Online Charge Card': return 'PAYMENT_METHOD_ONLINE_CREDIT_CARD';
+        case 'Online ACH Debit': return 'PAYMENT_METHOD_ONLINE_ACH_DEBIT';
+        default: return 'ERROR';
+    }
 }
