@@ -179,7 +179,7 @@ while(($csvInputFileDataRow = fgetcsv($csvInputFileHandle)) !== FALSE){
     $rowIndex++;
 }
 fclose($csvInputFileHandle);
-echo 'Input Row Count: ' . $rowReadCount . "\n";
+echo 'Input Data Row Count: ' . $rowReadCount . "\n";
 
 // EXIT IF NOTHING READ
 if(count($dataInputRows) === 0){
