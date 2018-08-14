@@ -45,6 +45,7 @@ $infoFailureClassColumnName = 'failure_class';
 $infoFailureErrorColumnName = 'failure_error';
 
 // OUTPUT FILES
+$firstDataRowIndex = 5;
 $csvOutputSuccessFileNameTag = '_s';
 $csvOutputFailureFileNameTag = '_f';
 
@@ -221,13 +222,15 @@ $client = authenticate($sender_id, $sender_password, $company_id, $user_id, $use
 // PARSE DATA ROWS //
 /////////////////////
 
+$rowIndex = $firstDataRowIndex;
 $lastArPayment = NULL;
 $arPayments = array();
 
-foreach($dataInputRows as $dataInputRow) {
+foreach($dataInputRows as $dataInputRow){
     // CHECK IF ROW IS JUST PAYMENT ITEM FIELDS OR A FULL PAYMENT
     $bothPaymentItemFieldsSpecified = TRUE;
     $someNonPaymentItemFieldSpecified = FALSE;
+    $allFieldsUnspecified = TRUE;
     foreach($dataColumnNames as $dataColumnName){
         if($dataColumnName === $dataApplyToInvoiceKey
             || $dataColumnName === $dataApplyToInvoiceAmount){
@@ -240,6 +243,9 @@ foreach($dataInputRows as $dataInputRow) {
                 $someNonPaymentItemFieldSpecified = TRUE;
             }
         }
+        if(!empty($dataInputRow[$dataColumnName])){
+            $allFieldsUnspecified = FALSE;
+        }
     }
     // GET ROWS
     $customerAccountId = $dataInputRow[$dataCustomerAccountIdColumnName];
@@ -251,18 +257,24 @@ foreach($dataInputRows as $dataInputRow) {
     $overpaymentLocationId = $dataInputRow[$dataOverpaymentLocationIdColumnName];
     $applyToInvoiceKey = $dataInputRow[$dataApplyToInvoiceKey];
     $applyToInvoiceAmount = $dataInputRow[$dataApplyToInvoiceAmount];
+    if($allFieldsUnspecified){
+        exit('Error: all fields unspecified at row: ' . $rowIndex . "\n");
+    }
     // HANDLE JUST PAYMENT ITEM
-    if($bothPaymentItemFieldsSpecified && !$someNonPaymentItemFieldSpecified && $lastArPayment!=NULL){
-        //echo "B\n";
+    else if($bothPaymentItemFieldsSpecified && !$someNonPaymentItemFieldSpecified && $lastArPayment!=NULL){
         addArPaymentItemToArPayment($lastArPayment, $applyToInvoiceKey, $applyToInvoiceAmount);
     }
     // HANDLE FULL PAYMENT
     else{
+        $paymentMethodString = getPaymentMethodStringFromConstant($paymentMethod);
+        if($paymentMethodString === NULL){
+            exit('Error: invalid payment method at row: ' . $rowIndex . "\n");
+        }
         $arPayment = new ArPaymentCreate();
         $arPayment->setCustomerId($customerAccountId);
         $arPayment->setTransactionPaymentAmount($paymentAmount);
         $arPayment->setReceivedDate(new DateTime($dateReceived));
-        $arPayment->setPaymentMethod(constant("Intacct\Functions\AccountsReceivable\ArPaymentCreate::$paymentMethod"));
+        $arPayment->setPaymentMethod($paymentMethodString);
         if(!empty($bankAccountId)){
             $arPayment->setBankAccountId($bankAccountId);
         }
@@ -273,7 +285,6 @@ foreach($dataInputRows as $dataInputRow) {
             $arPayment->setOverpaymentLocationId($overpaymentLocationId);
         }
         if($bothPaymentItemFieldsSpecified){
-            //echo "A\n";
             addArPaymentItemToArPayment($arPayment, $applyToInvoiceKey, $applyToInvoiceAmount);
         }
         // UPDATE LAST PAYMENT
@@ -281,6 +292,7 @@ foreach($dataInputRows as $dataInputRow) {
         // RECORD PAYMENT
         $arPayments[] = $arPayment;
     }
+    $rowIndex++;
 }
 
 //////////////////////
@@ -289,10 +301,10 @@ foreach($dataInputRows as $dataInputRow) {
 
 $successObjects = array();
 $failureObjects = array();
-foreach($arPayments as $arPayment) {
+foreach($arPayments as $arPayment){
     // LOG TRANSACTION TIMESTAMP
     $timestamp = date($timestampFormat) . date_default_timezone_get();
-    try {
+    try{
         // EXECUTE
         $logger->info('Executing query to Intacct API');
         $response = $client->execute($arPayment);
@@ -319,7 +331,7 @@ foreach($arPayments as $arPayment) {
         // OUTPUT MESSAGE
         echo $successProgressOutput;
     }
-    catch (\Intacct\Exception\ResponseException $ex) {
+    catch (\Intacct\Exception\ResponseException $ex){
         $logger->error('An Intacct response exception was thrown', [
             get_class($ex) => $ex->getMessage(),
             'Errors' => $ex->getErrors(),
@@ -341,7 +353,7 @@ foreach($arPayments as $arPayment) {
         // OUTPUT MESSAGE
         echo $failureProgressOutput;
     }
-    catch (\Exception $ex) {
+    catch (\Exception $ex){
         $logger->error('An exception was thrown', [
             get_class($ex) => $ex->getMessage(),
         ]);
@@ -479,7 +491,7 @@ function outputFile($fileHandle, $orderedConfigColumnNames, $configRow, $ordered
         $arPaymentFields[$dataCustomerAccountIdColumnName] = $dataObject[$paymentObjectName]->getCustomerId();
         $arPaymentFields[$dataPaymentAmountColumnName] = $dataObject[$paymentObjectName]->getTransactionPaymentAmount();
         $arPaymentFields[$dataDateReceivedColumnName] = $dataObject[$paymentObjectName]->getReceivedDate()->format($dateReceivedFormat);
-        $arPaymentFields[$dataPaymentMethodColumnName] = getPaymentMentodConstantFromString($dataObject[$paymentObjectName]->getPaymentMethod());
+        $arPaymentFields[$dataPaymentMethodColumnName] = getPaymentMethodConstantFromString($dataObject[$paymentObjectName]->getPaymentMethod());
         $arPaymentFields[$dataBankAccountIdColumnName] = $dataObject[$paymentObjectName]->getBankAccountId();
         $arPaymentFields[$dataUndepositedFundsGlAccountNumberColumnName] = $dataObject[$paymentObjectName]->getUndepositedFundsGlAccountNo();
         $arPaymentFields[$dataOverpaymentLocationIdColumnName] = $dataObject[$paymentObjectName]->getOverpaymentLocationId();
@@ -536,7 +548,7 @@ function addArPaymentItemToArPayment($arPayment, $invoiceKey, $invoiceAmount){
     $arPayment->setApplyToTransactions($applyToTransactions);
 }
 
-function getPaymentMentodConstantFromString($s){
+function getPaymentMethodConstantFromString($s){
     switch($s){
         case 'Printed Check': return 'PAYMENT_METHOD_CHECK';
         case 'Cash': return 'PAYMENT_METHOD_CASH';
@@ -546,5 +558,19 @@ function getPaymentMentodConstantFromString($s){
         case 'Online Charge Card': return 'PAYMENT_METHOD_ONLINE_CREDIT_CARD';
         case 'Online ACH Debit': return 'PAYMENT_METHOD_ONLINE_ACH_DEBIT';
         default: return 'ERROR';
+    }
+}
+
+function getPaymentMethodStringFromConstant($c){
+    switch($c){
+        case 'PAYMENT_METHOD_CHECK':
+        case 'PAYMENT_METHOD_CASH':
+        case 'PAYMENT_METHOD_RECORD_TRANSFER':
+        case 'PAYMENT_METHOD_CREDIT_CARD':
+        case 'PAYMENT_METHOD_ONLINE':
+        case 'PAYMENT_METHOD_ONLINE_CREDIT_CARD':
+        case 'PAYMENT_METHOD_ONLINE_ACH_DEBIT':
+            return constant("Intacct\Functions\AccountsReceivable\ArPaymentCreate::$c");
+        default: return NULL;
     }
 }
