@@ -10,6 +10,8 @@ use Intacct\OnlineClient;
 use Intacct\ClientConfig;
 use Intacct\Functions\AccountsReceivable\ArPaymentCreate;
 use Intacct\Functions\AccountsReceivable\ArPaymentItem;
+use Intacct\Functions\Common\ReadByQuery;
+use Intacct\Functions\Common\Query\QueryString;
 
 ////////////
 // CONFIG //
@@ -32,7 +34,7 @@ $dataPaymentMethodColumnName = 'payment_method';
 $dataBankAccountIdColumnName = 'bank_account_id';
 $dataUndepositedFundsGlAccountNumberColumnName = 'undeposited_funds_gl_account_number';
 $dataOverpaymentLocationIdColumnName = 'overpayment_location_id';
-$dataApplyToInvoiceKey = 'apply_to_invoice_key';
+$dataApplyToInvoiceNumber = 'apply_to_invoice_number';
 $dataApplyToInvoiceAmount = 'apply_to_invoice_amount';
 
 // PAYMENT OBJECT NAME
@@ -77,7 +79,7 @@ $config = NULL;
 $configRow = NULL;
 
 // DATA COLUMNS
-$dataColumnNames = array($dataPaymentAmountColumnName, $dataCustomerAccountIdColumnName, $dataDateReceivedColumnName, $dataPaymentMethodColumnName, $dataBankAccountIdColumnName, $dataUndepositedFundsGlAccountNumberColumnName, $dataOverpaymentLocationIdColumnName, $dataApplyToInvoiceKey, $dataApplyToInvoiceAmount);
+$dataColumnNames = array($dataPaymentAmountColumnName, $dataCustomerAccountIdColumnName, $dataDateReceivedColumnName, $dataPaymentMethodColumnName, $dataBankAccountIdColumnName, $dataUndepositedFundsGlAccountNumberColumnName, $dataOverpaymentLocationIdColumnName, $dataApplyToInvoiceNumber, $dataApplyToInvoiceAmount);
 // DATA COLUMN INDICES (IN INSERTION ORDER)
 $dataColumnIndicesByColumnName = NULL;
 // DATA ROWS
@@ -232,7 +234,7 @@ foreach($dataInputRows as $dataInputRow){
     $someNonPaymentItemFieldSpecified = FALSE;
     $allFieldsUnspecified = TRUE;
     foreach($dataColumnNames as $dataColumnName){
-        if($dataColumnName === $dataApplyToInvoiceKey
+        if($dataColumnName === $dataApplyToInvoiceNumber
             || $dataColumnName === $dataApplyToInvoiceAmount){
             if(empty($dataInputRow[$dataColumnName])){
                 $bothPaymentItemFieldsSpecified = FALSE;
@@ -255,14 +257,15 @@ foreach($dataInputRows as $dataInputRow){
     $bankAccountId = $dataInputRow[$dataBankAccountIdColumnName];
     $undepositedFundsGlAccountNumber = $dataInputRow[$dataUndepositedFundsGlAccountNumberColumnName];
     $overpaymentLocationId = $dataInputRow[$dataOverpaymentLocationIdColumnName];
-    $applyToInvoiceKey = $dataInputRow[$dataApplyToInvoiceKey];
+    $applyToInvoiceNumber = $dataInputRow[$dataApplyToInvoiceNumber];
     $applyToInvoiceAmount = $dataInputRow[$dataApplyToInvoiceAmount];
     if($allFieldsUnspecified){
         exit('Error: all fields unspecified at row: ' . $rowIndex . "\n");
     }
     // HANDLE JUST PAYMENT ITEM
     else if($bothPaymentItemFieldsSpecified && !$someNonPaymentItemFieldSpecified && $lastArPayment!=NULL){
-        addArPaymentItemToArPayment($lastArPayment, $applyToInvoiceKey, $applyToInvoiceAmount);
+        $applyToRecordNumber = getRecordNumberForInvoiceNumber($applyToInvoiceNumber, $client, $logger);
+        addArPaymentItemToArPayment($lastArPayment, $applyToRecordNumber, $applyToInvoiceAmount);
     }
     // HANDLE FULL PAYMENT
     else{
@@ -285,7 +288,8 @@ foreach($dataInputRows as $dataInputRow){
             $arPayment->setOverpaymentLocationId($overpaymentLocationId);
         }
         if($bothPaymentItemFieldsSpecified){
-            addArPaymentItemToArPayment($arPayment, $applyToInvoiceKey, $applyToInvoiceAmount);
+            $applyToRecordNumber = getRecordNumberForInvoiceNumber($applyToInvoiceNumber, $client, $logger);
+            addArPaymentItemToArPayment($arPayment, $applyToRecordNumber, $applyToInvoiceAmount);
         }
         // UPDATE LAST PAYMENT
         $lastArPayment = $arPayment;
@@ -306,11 +310,11 @@ foreach($arPayments as $arPayment){
     $timestamp = date($timestampFormat) . date_default_timezone_get();
     try{
         // EXECUTE
-        $logger->info('Executing query to Intacct API');
+        $logger->info('Executing transaction to Intacct API');
         $response = $client->execute($arPayment);
         $result = $response->getResult();
         // LOG RESULT
-        $logger->debug('Query successful', [
+        $logger->debug('Transaction successful', [
             'Company ID' => $response->getAuthentication()->getCompanyId(),
             'User ID' => $response->getAuthentication()->getUserId(),
             'Request control ID' => $response->getControl()->getControlId(),
@@ -399,8 +403,8 @@ $uploadSuccessCount = outputFile($csvOutputSuccessFileHandle, $orderedConfigSett
 $uploadFailureCount = outputFile($csvOutputFailureFileHandle, $orderedConfigSettingNames, $config, $dataInputColumnNames, $infoColumnNames, $failureObjects);
 
 // OUTPUT RESULT COUNTS
-echo 'Upload Success Count: ' . $uploadSuccessCount . "\n";
-echo 'Upload Failure Count: ' . $uploadFailureCount . "\n";
+echo 'Transaction Success Count: ' . $uploadSuccessCount . "\n";
+echo 'Transaction Failure Count: ' . $uploadFailureCount . "\n";
 
 ///////////////
 // FUNCTIONS //
@@ -469,7 +473,7 @@ function getRowGivenColumnNames($rawRow, $columnIndicesByColumnName, $columnName
 }
 
 function outputFile($fileHandle, $orderedConfigColumnNames, $configRow, $orderedDataColumnNames, $infoColumnNames, $dataObjects){
-    global $dateReceivedFormat, $paymentObjectName, $dataCustomerAccountIdColumnName, $dataPaymentAmountColumnName, $dataDateReceivedColumnName, $dataPaymentMethodColumnName, $dataBankAccountIdColumnName, $dataUndepositedFundsGlAccountNumberColumnName, $dataOverpaymentLocationIdColumnName, $dataApplyToInvoiceKey, $dataApplyToInvoiceAmount;
+    global $dateReceivedFormat, $paymentObjectName, $dataCustomerAccountIdColumnName, $dataPaymentAmountColumnName, $dataDateReceivedColumnName, $dataPaymentMethodColumnName, $dataBankAccountIdColumnName, $dataUndepositedFundsGlAccountNumberColumnName, $dataOverpaymentLocationIdColumnName, $dataApplyToInvoiceNumber, $dataApplyToInvoiceAmount;
     // OUTPUT CONFIG HEADER
     fputcsv($fileHandle, $orderedConfigColumnNames);
     // OUTPUT CONFIG SETTINGS
@@ -497,12 +501,12 @@ function outputFile($fileHandle, $orderedConfigColumnNames, $configRow, $ordered
         $arPaymentFields[$dataOverpaymentLocationIdColumnName] = $dataObject[$paymentObjectName]->getOverpaymentLocationId();
         $arPaymentApplyToTransactions = $dataObject[$paymentObjectName]->getApplyToTransactions();
         if(empty($arPaymentApplyToTransactions)){
-            $arPaymentFields[$dataApplyToInvoiceKey] = '';
+            $arPaymentFields[$dataApplyToInvoiceNumber] = '';
             $arPaymentFields[$dataApplyToInvoiceAmount] = '';
         }
         else{
             $firstPaymentItem = array_shift($arPaymentApplyToTransactions);
-            $arPaymentFields[$dataApplyToInvoiceKey] = $firstPaymentItem->getApplyToRecordId();
+            $arPaymentFields[$dataApplyToInvoiceNumber] = $firstPaymentItem->getApplyToRecordId();
             $arPaymentFields[$dataApplyToInvoiceAmount] = $firstPaymentItem->getAmountToApply();
         }
         // BUILD ORDERED TRANSACTION ROW
@@ -520,7 +524,7 @@ function outputFile($fileHandle, $orderedConfigColumnNames, $configRow, $ordered
             $orderedAdditionalPaymentItemRow = array();
             $additionalPaymentItem = array_shift($arPaymentApplyToTransactions);
             foreach($orderedDataColumnNames as $orderedDataColumnName){
-                if($orderedDataColumnName === $dataApplyToInvoiceKey){
+                if($orderedDataColumnName === $dataApplyToInvoiceNumber){
                     $orderedAdditionalPaymentItemRow[] = $additionalPaymentItem->getApplyToRecordId();
                 }
                 else if($orderedDataColumnName === $dataApplyToInvoiceAmount){
@@ -573,4 +577,42 @@ function getPaymentMethodStringFromConstant($c){
             return constant("Intacct\Functions\AccountsReceivable\ArPaymentCreate::$c");
         default: return NULL;
     }
+}
+
+function getRecordNumberForInvoiceNumber($invoiceNumber, $client, $logger){
+    $queryString = new QueryString("RECORDID='" . $invoiceNumber . "'");
+    $readByQuery = new ReadByQuery();
+    $readByQuery->setObjectName('ARINVOICE');
+    $readByQuery->setFields(array('RECORDNO'));
+    $readByQuery->setQuery($queryString);
+    try{
+        // EXECUTE
+        $logger->info('Executing query to Intacct API');
+        $response = $client->execute($readByQuery);
+        $result = $response->getResult();
+        // LOG RESULT
+        $logger->debug('Query successful', [
+            'Company ID' => $response->getAuthentication()->getCompanyId(),
+            'User ID' => $response->getAuthentication()->getUserId(),
+            'Request control ID' => $response->getControl()->getControlId(),
+            'Function control ID' => $result->getControlId(),
+            'Total count' => $result->getTotalCount(),
+            'Data' => json_decode(json_encode($result->getData()), 1),
+        ]);
+    }
+    catch (\Intacct\Exception\ResponseException $ex){
+        $logger->error('An Intacct response exception was thrown', [
+            get_class($ex) => $ex->getMessage(),
+            'Errors' => $ex->getErrors(),
+        ]);
+        exit('Error: could not translate an invoice_number (' . $invoiceNumber . ") into a record number\n");
+    }
+    catch (\Exception $ex){
+        $logger->error('An exception was thrown', [
+            get_class($ex) => $ex->getMessage(),
+        ]);
+        exit('Error: could not translate an invoice_number (' . $invoiceNumber . ") into a record number\n");
+    }
+    $result = json_decode(json_encode($result->getData()), 1)[0]['RECORDNO'];
+    return $result;
 }
