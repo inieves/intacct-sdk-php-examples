@@ -479,7 +479,7 @@ function outputFile($fileHandle, $orderedConfigColumnNames, $configRow, $ordered
     }
     fputcsv($fileHandle, $orderedConfigRow);
     // OUTPUT BLANK ROW
-    fputcsv($fileHandle, array());
+    fputcsv($fileHandle, array('',''));
     // OUTPUT DATA HEADER
     $orderedDataAndInfoColumnNames = array_merge($orderedDataColumnNames, $infoColumnNames);
     fputcsv($fileHandle, $orderedDataAndInfoColumnNames);
