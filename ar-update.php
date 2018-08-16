@@ -108,8 +108,8 @@ $csvOutputFailureFileHandle = NULL;
 $csvOutputFailureFileDataRow = NULL;
 
 // INVOICE NUMBERS TO TRANSLATE TO RECORD NUMBERS
-$applyToInvoiceNumbers = NULL;
 $applyToRecordNumbersByInvoiceNumber = NULL;
+$invoiceNumbersByArPaymentControlId = NULL;
 
 /////////////////
 // INPUT FILES //
@@ -231,7 +231,7 @@ $client = authenticate($sender_id, $sender_password, $company_id, $user_id, $use
 $rowIndex = $firstDataRowIndex;
 $lastArPayment = NULL;
 $arPayments = array();
-$applyToInvoiceNumbers = array();
+$invoiceNumbersByArPaymentControlId = array();
 
 foreach($dataInputRows as $dataInputRow){
     // CHECK IF ROW IS JUST PAYMENT ITEM FIELDS OR A FULL PAYMENT
@@ -269,8 +269,8 @@ foreach($dataInputRows as $dataInputRow){
     }
     // HANDLE JUST PAYMENT ITEM
     else if($bothPaymentItemFieldsSpecified && !$someNonPaymentItemFieldSpecified && $lastArPayment!=NULL){
-        $applyToInvoiceNumbers[] = $applyToInvoiceNumber;
-        addArPaymentItemToArPayment($lastArPayment, $applyToInvoiceNumber, $applyToInvoiceAmount);
+        addArPaymentItemWithAmountToArPayment($lastArPayment, $applyToInvoiceAmount);
+        storeArPaymentInvoiceNumber($lastArPayment, $applyToInvoiceNumber, $invoiceNumbersByArPaymentControlId);
     }
     // HANDLE FULL PAYMENT
     else{
@@ -293,8 +293,8 @@ foreach($dataInputRows as $dataInputRow){
             $arPayment->setOverpaymentLocationId($overpaymentLocationId);
         }
         if($bothPaymentItemFieldsSpecified){
-            $applyToInvoiceNumbers[] = $applyToInvoiceNumber;
-            addArPaymentItemToArPayment($arPayment, $applyToInvoiceNumber, $applyToInvoiceAmount);
+            addArPaymentItemWithAmountToArPayment($arPayment, $applyToInvoiceAmount);
+            storeArPaymentInvoiceNumber($arPayment, $applyToInvoiceNumber, $invoiceNumbersByArPaymentControlId);
         }
         // UPDATE LAST PAYMENT
         $lastArPayment = $arPayment;
@@ -308,10 +308,10 @@ foreach($dataInputRows as $dataInputRow){
 // TRANSLATE INVOICE NUMBERS TO RECORD NUMBERS (IN BATCH) //
 ////////////////////////////////////////////////////////////
 
-$applyToRecordNumbersByInvoiceNumber = getRecordNumbersByInvoiceNumbers($applyToInvoiceNumbers, $client, $logger);
+$applyToRecordNumbersByInvoiceNumber = getRecordNumbersByInvoiceNumbers($invoiceNumbersByArPaymentControlId, $client, $logger);
 
 foreach($arPayments as $arPayment){
-    translateArPaymentItemsInArPayment($arPayment, $applyToRecordNumbersByInvoiceNumber);
+    translateInvoiceNumbersToRecordNumbersInArPaymentItems($arPayment, $applyToRecordNumbersByInvoiceNumber);
 }
 
 /////////////////////////////////
@@ -371,7 +371,12 @@ else{
         // ADD FAILURE INFO TO OBJECT
         $failureObject[$infoFailureClassColumnName] = '';
         $failureObject[$infoFailureMessageColumnName] = '';
-        $failureObject[$infoFailureErrorColumnName] = $errorsByControlId[$arPayment->getControlId()];
+        if(isset($errorsByControlId[$arPayment->getControlId()])){
+            $failureObject[$infoFailureErrorColumnName] = $errorsByControlId[$arPayment->getControlId()];
+        }
+        else{
+            $failureObject[$infoFailureErrorColumnName] = '';
+        }
         // STORE OBJECT FOR OUTPUT
         $failureObjects[] = $failureObject;
     }
@@ -400,11 +405,11 @@ $uploadSuccessCount = 0;
 $uploadFailureCount = 0;
 if($isSuccess){
     // OUTPUT SUCCESS FILE
-    $uploadSuccessCount = outputFile($csvOutputSuccessFileHandle, $orderedConfigSettingNames, $config, $dataInputColumnNames, $infoColumnNames, $successObjects);
+    $uploadSuccessCount = outputFile($csvOutputSuccessFileHandle, $orderedConfigSettingNames, $config, $dataInputColumnNames, $infoColumnNames, $successObjects, $invoiceNumbersByArPaymentControlId);
 }
 else{
     // OUTPUT FAILURE FILE
-    $uploadFailureCount = outputFile($csvOutputFailureFileHandle, $orderedConfigSettingNames, $config, $dataInputColumnNames, $infoColumnNames, $failureObjects);
+    $uploadFailureCount = outputFile($csvOutputFailureFileHandle, $orderedConfigSettingNames, $config, $dataInputColumnNames, $infoColumnNames, $failureObjects, $invoiceNumbersByArPaymentControlId);
 }
 
 // OUTPUT RESULT COUNTS
@@ -478,7 +483,7 @@ function getRowGivenColumnNames($rawRow, $columnIndicesByColumnName, $columnName
     return $row;
 }
 
-function outputFile($fileHandle, $orderedConfigColumnNames, $configRow, $orderedDataColumnNames, $infoColumnNames, $dataObjects){
+function outputFile($fileHandle, $orderedConfigColumnNames, $configRow, $orderedDataColumnNames, $infoColumnNames, $dataObjects, $invoiceNumbersByArPaymentControlId){
     global $dateReceivedFormat, $paymentObjectName, $dataCustomerAccountIdColumnName, $dataPaymentAmountColumnName, $dataDateReceivedColumnName, $dataPaymentMethodColumnName, $dataBankAccountIdColumnName, $dataUndepositedFundsGlAccountNumberColumnName, $dataOverpaymentLocationIdColumnName, $dataApplyToInvoiceNumber, $dataApplyToInvoiceAmount;
     // OUTPUT CONFIG HEADER
     fputcsv($fileHandle, $orderedConfigColumnNames);
@@ -496,6 +501,7 @@ function outputFile($fileHandle, $orderedConfigColumnNames, $configRow, $ordered
     // OUTPUT DATA ROWS
     $objectCount = 0;
     foreach($dataObjects as $dataObject){
+        $invoiceNumbers = NULL;
         // GET OBJECT FIELDS
         $arPaymentFields = array();
         $arPaymentFields[$dataCustomerAccountIdColumnName] = $dataObject[$paymentObjectName]->getCustomerId();
@@ -511,8 +517,10 @@ function outputFile($fileHandle, $orderedConfigColumnNames, $configRow, $ordered
             $arPaymentFields[$dataApplyToInvoiceAmount] = '';
         }
         else{
+            $invoiceNumbers = $invoiceNumbersByArPaymentControlId[$dataObject[$paymentObjectName]->getControlId()];
             $firstPaymentItem = array_shift($arPaymentApplyToTransactions);
-            $arPaymentFields[$dataApplyToInvoiceNumber] = $firstPaymentItem->getApplyToRecordId();
+            $firstInvoiceNumber = array_shift($invoiceNumbers);
+            $arPaymentFields[$dataApplyToInvoiceNumber] = $firstInvoiceNumber;
             $arPaymentFields[$dataApplyToInvoiceAmount] = $firstPaymentItem->getAmountToApply();
         }
         // BUILD ORDERED TRANSACTION ROW
@@ -529,9 +537,10 @@ function outputFile($fileHandle, $orderedConfigColumnNames, $configRow, $ordered
         while(!empty($arPaymentApplyToTransactions)){
             $orderedAdditionalPaymentItemRow = array();
             $additionalPaymentItem = array_shift($arPaymentApplyToTransactions);
+            $additionalInvoiceNumber = array_shift($invoiceNumbers);
             foreach($orderedDataColumnNames as $orderedDataColumnName){
                 if($orderedDataColumnName === $dataApplyToInvoiceNumber){
-                    $orderedAdditionalPaymentItemRow[] = $additionalPaymentItem->getApplyToRecordId();
+                    $orderedAdditionalPaymentItemRow[] = $additionalInvoiceNumber;
                 }
                 else if($orderedDataColumnName === $dataApplyToInvoiceAmount){
                     $orderedAdditionalPaymentItemRow[] = $additionalPaymentItem->getAmountToApply();
@@ -549,20 +558,40 @@ function outputFile($fileHandle, $orderedConfigColumnNames, $configRow, $ordered
     return $objectCount;
 }
 
-function addArPaymentItemToArPayment($arPayment, $invoiceKey, $invoiceAmount){
+function addArPaymentItemWithAmountToArPayment($arPayment, $invoiceAmount){
     $arPaymentItem = new ArPaymentItem();
-    $arPaymentItem->setApplyToRecordId($invoiceKey);
     $arPaymentItem->setAmountToApply($invoiceAmount);
     $applyToTransactions = $arPayment->getApplyToTransactions();
     $applyToTransactions[] = $arPaymentItem;
     $arPayment->setApplyToTransactions($applyToTransactions);
 }
 
-function translateArPaymentItemsInArPayment($arPayment, $recordNumbersByInvoiceNumbers){
+function storeArPaymentInvoiceNumber($arPayment, $applyToInvoiceNumber, &$invoiceNumbersByArPaymentControlId){
+    if(!isset($invoiceNumbersByArPaymentControlId[$arPayment->getControlId()])){
+        $invoiceNumbersByArPaymentControlId[$arPayment->getControlId()] = array();
+    }
+    $invoiceNumbersByArPaymentControlId[$arPayment->getControlId()][] = $applyToInvoiceNumber;
+}
+
+function storeInvoiceNumbersFromArPaymentItems($arPayment, $invoiceNumbersByArPaymentControlId){
+    $invoiceNumbers = array();
+    $applyToTransactions = $arPayment->getApplyToTransactions();
+    foreach($applyToTransactions as $arPaymentItem){
+        $invoiceNumbers[] = $arPaymentItem->getApplyToRecordId();
+    }
+    $invoiceNumbersByArPaymentControlId[$arPayment->getControlId()] = $invoiceNumbers;
+}
+
+function translateInvoiceNumbersToRecordNumbersInArPaymentItems($arPayment, $recordNumbersByInvoiceNumbers){
     $applyToTransactions = $arPayment->getApplyToTransactions();
     foreach($applyToTransactions as $arPaymentItem){
         $invoiceNumber = $arPaymentItem->getApplyToRecordId();
-        $recordNumber = $recordNumbersByInvoiceNumbers[$invoiceNumber];
+        if(isset($recordNumbersByInvoiceNumbers[$invoiceNumber])){
+            $recordNumber = $recordNumbersByInvoiceNumbers[$invoiceNumber];
+        }
+        else{
+            $recordNumber = NULL;
+        }
         $arPaymentItem->setApplyToRecordId($recordNumber);
     }
 }
@@ -594,11 +623,14 @@ function getPaymentMethodStringFromConstant($c){
     }
 }
 
-function getRecordNumbersByInvoiceNumbers($invoiceNumbers, $client, $logger){
-    foreach($invoiceNumbers as $key=>$value){
-        $invoiceNumbers[$key] = "'" . $value . "'";
+function getRecordNumbersByInvoiceNumbers($invoiceNumbersByArPaymentControlId, $client, $logger){
+    $allInvoiceNumbers = array();
+    foreach($invoiceNumbersByArPaymentControlId as $key=>$value){
+        foreach($value as $invoiceNumber){
+            $allInvoiceNumbers[] = "'" . $invoiceNumber . "'";
+        }
     }
-    $queryString = new QueryString('RECORDID in (' . implode(',', $invoiceNumbers) . ')');
+    $queryString = new QueryString('RECORDID in (' . implode(',', $allInvoiceNumbers) . ')');
     $readByQuery = new ReadByQuery();
     $readByQuery->setObjectName('ARINVOICE');
     $readByQuery->setFields(array('RECORDNO', 'RECORDID'));
