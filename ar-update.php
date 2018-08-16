@@ -43,9 +43,7 @@ $paymentObjectName = 'payment';
 
 // INFO COLUMN NAMES
 $infoTimestampColumnName = 'time_stamp';
-$infoFailureMessageColumnName = 'failure_message';
-$infoFailureClassColumnName = 'failure_class';
-$infoFailureErrorColumnName = 'failure_error';
+$infoErrorMessagesColumnName = 'error_messages';
 
 // OUTPUT FILES
 $firstDataRowIndex = 5;
@@ -91,7 +89,7 @@ $dataInputSuccessRows = NULL;
 $dataInputFailureRows = NULL;
 
 // INFO COLUMNS
-$infoColumnNames = array($infoTimestampColumnName, $infoFailureMessageColumnName, $infoFailureClassColumnName, $infoFailureErrorColumnName);
+$infoColumnNames = array($infoTimestampColumnName, $infoErrorMessagesColumnName);
 
 // INPUT FILE STATE
 $csvInputFilePath = NULL;
@@ -340,9 +338,7 @@ if($isSuccess){
         $successObject[$paymentObjectName] = $arPayment;
         $successObject[$infoTimestampColumnName] = $timestamp;
         // ADD FAILURE INFO TO OBJECT
-        $successObject[$infoFailureClassColumnName] = '';
-        $successObject[$infoFailureMessageColumnName] = '';
-        $successObject[$infoFailureErrorColumnName] = '';
+        $successObject[$infoErrorMessagesColumnName] = '';
         // STORE OBJECT FOR OUTPUT
         $successObjects[] = $successObject;
     }
@@ -354,7 +350,7 @@ else{
     foreach($results as $result){
         $errors = $result->getErrors();
         if(!empty($errors)){
-            $errorsString = print_r($errors, TRUE);
+            $errorsString = implode("\n", $errors);//print_r($errors, TRUE);
             $errorsString = str_replace(',', '.', $errorsString);
             $errorsByControlId[$result->getControlId()] = $errorsString;
         }
@@ -369,13 +365,11 @@ else{
         $failureObject[$paymentObjectName] = $arPayment;
         $failureObject[$infoTimestampColumnName] = $timestamp;
         // ADD FAILURE INFO TO OBJECT
-        $failureObject[$infoFailureClassColumnName] = '';
-        $failureObject[$infoFailureMessageColumnName] = '';
         if(isset($errorsByControlId[$arPayment->getControlId()])){
-            $failureObject[$infoFailureErrorColumnName] = $errorsByControlId[$arPayment->getControlId()];
+            $failureObject[$infoErrorMessagesColumnName] = $errorsByControlId[$arPayment->getControlId()];
         }
         else{
-            $failureObject[$infoFailureErrorColumnName] = '';
+            $failureObject[$infoErrorMessagesColumnName] = '';
         }
         // STORE OBJECT FOR OUTPUT
         $failureObjects[] = $failureObject;
