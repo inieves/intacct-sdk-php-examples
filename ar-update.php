@@ -8,6 +8,7 @@ $loader = require __DIR__ . '/vendor/autoload.php';
 
 use Intacct\OnlineClient;
 use Intacct\ClientConfig;
+use Intacct\RequestConfig;
 use Intacct\Functions\AccountsReceivable\ArPaymentCreate;
 use Intacct\Functions\AccountsReceivable\ArPaymentItem;
 use Intacct\Functions\Common\ReadByQuery;
@@ -303,9 +304,9 @@ foreach($dataInputRows as $dataInputRow){
     $rowIndex++;
 }
 
-/////////////////////////////////////////////////
-// TRANSLATE INVOICE NUMBERS TO RECORD NUMBERS //
-/////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+// TRANSLATE INVOICE NUMBERS TO RECORD NUMBERS (IN BATCH) //
+////////////////////////////////////////////////////////////
 
 $applyToRecordNumbersByInvoiceNumber = getRecordNumbersByInvoiceNumbers($applyToInvoiceNumbers, $client, $logger);
 
@@ -313,29 +314,27 @@ foreach($arPayments as $arPayment){
     translateArPaymentItemsInArPayment($arPayment, $applyToRecordNumbersByInvoiceNumber);
 }
 
-//////////////////////
-// PROCESS PAYMENTS //
-//////////////////////
+/////////////////////////////////
+// PROCESS PAYMENTS (IN BATCH) //
+/////////////////////////////////
 
-$successObjects = array();
-$failureObjects = array();
-foreach($arPayments as $arPayment){
-    // LOG TRANSACTION TIMESTAMP
-    $timestamp = date($timestampFormat) . date_default_timezone_get();
-    try{
-        // EXECUTE
-        $logger->info('Executing transaction to Intacct API');
-        $response = $client->execute($arPayment);
-        $result = $response->getResult();
-        // LOG RESULT
-        $logger->debug('Transaction successful', [
-            'Company ID' => $response->getAuthentication()->getCompanyId(),
-            'User ID' => $response->getAuthentication()->getUserId(),
-            'Request control ID' => $response->getControl()->getControlId(),
-            'Function control ID' => $result->getControlId(),
-            'Total count' => $result->getTotalCount(),
-            'Data' => json_decode(json_encode($result->getData()), 1),
-        ]);
+echo "\n";
+
+$isSuccess = NULL;
+
+// LOG TRANSACTION TIMESTAMP
+$timestamp = date($timestampFormat) . date_default_timezone_get();
+$logger->info('Executing batch transaction to Intacct API');
+$requestConfig = new RequestConfig();
+$requestConfig->setTransaction(true);
+$response = $client->executeBatch($arPayments, $requestConfig);
+$results = $response->getResults();
+
+$isSuccess = $results[0]->getStatus() === 'success';
+
+if($isSuccess){
+    $successObjects = array();
+    foreach($arPayments as $arPayment){
         // CREATE OBJECT FOR OUTPUT
         $successObject = array();
         $successObject[$paymentObjectName] = $arPayment;
@@ -346,51 +345,38 @@ foreach($arPayments as $arPayment){
         $successObject[$infoFailureErrorColumnName] = '';
         // STORE OBJECT FOR OUTPUT
         $successObjects[] = $successObject;
-        // OUTPUT MESSAGE
-        echo $successProgressOutput;
     }
-    catch (\Intacct\Exception\ResponseException $ex){
-        $logger->error('An Intacct response exception was thrown', [
-            get_class($ex) => $ex->getMessage(),
-            'Errors' => $ex->getErrors(),
-        ]);
+    // OUTPUT MESSAGE
+    echo "SUCCESS\n";
+}
+else{
+    $errorsByControlId = array();
+    foreach($results as $result){
+        $errors = $result->getErrors();
+        if(!empty($errors)){
+            $errorsString = print_r($errors, TRUE);
+            $errorsString = str_replace(',', '.', $errorsString);
+            $errorsByControlId[$result->getControlId()] = $errorsString;
+        }
+        else{
+            $errorsByControlId[$result->getControlId()] = '';
+        }
+    }
+    $failureObjects = array();
+    foreach($arPayments as $arPayment){
         // CREATE OBJECT FOR OUTPUT
         $failureObject = array();
         $failureObject[$paymentObjectName] = $arPayment;
         $failureObject[$infoTimestampColumnName] = $timestamp;
         // ADD FAILURE INFO TO OBJECT
-        $failureObject[$infoFailureClassColumnName] = get_class($ex);
-        $failureObject[$infoFailureMessageColumnName] = $ex->getMessage();
-        $failureObject[$infoFailureErrorColumnName] = print_r($ex->getErrors(), TRUE);
-        // REPLACE COMMAS
-        $failureObject[$infoFailureClassColumnName] = str_replace(',', '.', $failureObject[$infoFailureClassColumnName]);
-        $failureObject[$infoFailureMessageColumnName] = str_replace(',', '.', $failureObject[$infoFailureMessageColumnName]);
-        $failureObject[$infoFailureErrorColumnName] = str_replace(',', '.', $failureObject[$infoFailureErrorColumnName]);
+        $failureObject[$infoFailureClassColumnName] = '';
+        $failureObject[$infoFailureMessageColumnName] = '';
+        $failureObject[$infoFailureErrorColumnName] = $errorsByControlId[$arPayment->getControlId()];
         // STORE OBJECT FOR OUTPUT
         $failureObjects[] = $failureObject;
-        // OUTPUT MESSAGE
-        echo $failureProgressOutput;
     }
-    catch (\Exception $ex){
-        $logger->error('An exception was thrown', [
-            get_class($ex) => $ex->getMessage(),
-        ]);
-        // CREATE OBJECT FOR OUTPUT
-        $failureObject = array();
-        $failureObject[$paymentObjectName] = $arPayment;
-        $failureObject[$infoTimestampColumnName] = $timestamp;
-        // ADD FAILURE INFO TO OBJECT
-        $failureObject[$infoFailureClassColumnName] = get_class($ex);
-        $failureObject[$infoFailureMessageColumnName] = $ex->getMessage();
-        $failureObject[$infoFailureErrorColumnName] = '';
-        // REPLACE COMMAS
-        $failureObject[$infoFailureClassColumnName] = str_replace(',', '.', $failureObject[$infoFailureClassColumnName]);
-        $failureObject[$infoFailureMessageColumnName] = str_replace(',', '.', $failureObject[$infoFailureMessageColumnName]);
-        // STORE OBJECT FOR OUTPUT
-        $failureObjects[] = $failureObject;
-        // OUTPUT MESSAGE
-        echo $failureProgressOutput;
-    }
+    // OUTPUT MESSAGE
+    echo "FAILURE (all transactions rolled back)\n";
 }
 
 echo "\n";
@@ -410,15 +396,21 @@ foreach($dataColumnIndicesByColumnName as $rowName=>$rowIndex){
     $dataInputColumnNames[] = $rowName;
 }
 
-// OUTPUT SUCCESS FILE
-$uploadSuccessCount = outputFile($csvOutputSuccessFileHandle, $orderedConfigSettingNames, $config, $dataInputColumnNames, $infoColumnNames, $successObjects);
-
-// OUTPUT FAILURE FILE
-$uploadFailureCount = outputFile($csvOutputFailureFileHandle, $orderedConfigSettingNames, $config, $dataInputColumnNames, $infoColumnNames, $failureObjects);
+$uploadSuccessCount = 0;
+$uploadFailureCount = 0;
+if($isSuccess){
+    // OUTPUT SUCCESS FILE
+    $uploadSuccessCount = outputFile($csvOutputSuccessFileHandle, $orderedConfigSettingNames, $config, $dataInputColumnNames, $infoColumnNames, $successObjects);
+}
+else{
+    // OUTPUT FAILURE FILE
+    $uploadFailureCount = outputFile($csvOutputFailureFileHandle, $orderedConfigSettingNames, $config, $dataInputColumnNames, $infoColumnNames, $failureObjects);
+}
 
 // OUTPUT RESULT COUNTS
 echo 'Transaction Success Count: ' . $uploadSuccessCount . "\n";
 echo 'Transaction Failure Count: ' . $uploadFailureCount . "\n";
+
 
 ///////////////
 // FUNCTIONS //
@@ -613,7 +605,7 @@ function getRecordNumbersByInvoiceNumbers($invoiceNumbers, $client, $logger){
     $readByQuery->setQuery($queryString);
     try{
         // EXECUTE
-        $logger->info('Executing query to Intacct API');
+        $logger->info('Executing batch query to Intacct API');
         $response = $client->execute($readByQuery);
         $result = $response->getResult();
         // LOG RESULT
@@ -639,10 +631,10 @@ function getRecordNumbersByInvoiceNumbers($invoiceNumbers, $client, $logger){
         ]);
         exit('Error: could not translate an invoice_number (' . $invoiceNumber . ") into a record number\n");
     }
-    $results = json_decode(json_encode($result->getData()), 1);
+    $objects = json_decode(json_encode($result->getData()), 1);
     $recordNumbers = array();
-    foreach($results as $result){
-        $recordNumbers[$result['RECORDID']] = $result['RECORDNO'];
+    foreach($objects as $object){
+        $recordNumbers[$object['RECORDID']] = $object['RECORDNO'];
     }
     return $recordNumbers;
 }
