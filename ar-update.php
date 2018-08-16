@@ -445,7 +445,7 @@ function getColumnIndicesByColumnName($csvInputFileRow, $columnNames){
     }
     $errorColumn = NULL;
     foreach($columnNames as $columnName){
-        if($columnIndicesByColumnName[$columnName] === NULL){
+        if(!isset($columnIndicesByColumnName[$columnName])){
             $errorColumn = $columnName;
             break;
         }
