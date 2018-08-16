@@ -91,6 +91,9 @@ $dataInputFailureRows = NULL;
 // INFO COLUMNS
 $infoColumnNames = array($infoTimestampColumnName, $infoErrorMessagesColumnName);
 
+// RESULT OBJECTS
+$resultObjects = NULL;
+
 // INPUT FILE STATE
 $csvInputFilePath = NULL;
 $csvInputFileHandle = NULL;
@@ -189,23 +192,6 @@ echo 'Input Data Row Count: ' . $rowReadCount . "\n";
 // EXIT IF NOTHING READ
 if(count($dataInputRows) === 0){
     exit("Error: no rows input\n");
-}
-
-//////////////////
-// OUTPUT FILES //
-//////////////////
-
-$csvOutputSuccessFilePath = getNewFilePath($csvInputFilePath, $csvOutputSuccessFileNameTag);
-$csvOutputFailureFilePath = getNewFilePath($csvInputFilePath, $csvOutputFailureFileNameTag);
-
-// GET FILE HANDLES
-$csvOutputSuccessFileHandle = @fopen($csvOutputSuccessFilePath, 'w');
-if($csvOutputSuccessFileHandle === FALSE){
-    exit('Error: unable to open CSV output success file for writing: (' . $csvOutputSuccessFilePath . ")\n");
-}
-$csvOutputFailureFileHandle = @fopen($csvOutputFailureFilePath, 'w');
-if($csvOutputFailureFileHandle === FALSE){
-    exit('Error: unable to open CSV output failure file for writing: (' . $csvOutputFailureFilePath . ")\n");
 }
 
 //////////////////
@@ -329,18 +315,18 @@ $response = $client->executeBatch($arPayments, $requestConfig);
 $results = $response->getResults();
 
 $isSuccess = $results[0]->getStatus() === 'success';
+$resultObjects = array();
 
 if($isSuccess){
-    $successObjects = array();
     foreach($arPayments as $arPayment){
         // CREATE OBJECT FOR OUTPUT
-        $successObject = array();
-        $successObject[$paymentObjectName] = $arPayment;
-        $successObject[$infoTimestampColumnName] = $timestamp;
+        $resultObject = array();
+        $resultObject[$paymentObjectName] = $arPayment;
+        $resultObject[$infoTimestampColumnName] = $timestamp;
         // ADD FAILURE INFO TO OBJECT
-        $successObject[$infoErrorMessagesColumnName] = '';
+        $resultObject[$infoErrorMessagesColumnName] = '';
         // STORE OBJECT FOR OUTPUT
-        $successObjects[] = $successObject;
+        $resultObjects[] = $resultObject;
     }
     // OUTPUT MESSAGE
     echo "SUCCESS\n";
@@ -358,21 +344,20 @@ else{
             $errorsByControlId[$result->getControlId()] = '';
         }
     }
-    $failureObjects = array();
     foreach($arPayments as $arPayment){
         // CREATE OBJECT FOR OUTPUT
-        $failureObject = array();
-        $failureObject[$paymentObjectName] = $arPayment;
-        $failureObject[$infoTimestampColumnName] = $timestamp;
+        $resultObject = array();
+        $resultObject[$paymentObjectName] = $arPayment;
+        $resultObject[$infoTimestampColumnName] = $timestamp;
         // ADD FAILURE INFO TO OBJECT
         if(isset($errorsByControlId[$arPayment->getControlId()])){
-            $failureObject[$infoErrorMessagesColumnName] = $errorsByControlId[$arPayment->getControlId()];
+            $resultObject[$infoErrorMessagesColumnName] = $errorsByControlId[$arPayment->getControlId()];
         }
         else{
-            $failureObject[$infoErrorMessagesColumnName] = '';
+            $resultObject[$infoErrorMessagesColumnName] = '';
         }
         // STORE OBJECT FOR OUTPUT
-        $failureObjects[] = $failureObject;
+        $resultObjects[] = $resultObject;
     }
     // OUTPUT MESSAGE
     echo "FAILURE (all transactions rolled back)\n";
@@ -383,6 +368,7 @@ echo "\n";
 //////////////////
 // OUTPUT FILES //
 //////////////////
+
 
 // GENERATE CONFIG COLUMN NAMES AND SETTINGS
 $orderedConfigSettingNames = array();
@@ -395,20 +381,21 @@ foreach($dataColumnIndicesByColumnName as $rowName=>$rowIndex){
     $dataInputColumnNames[] = $rowName;
 }
 
-$uploadSuccessCount = 0;
-$uploadFailureCount = 0;
 if($isSuccess){
-    // OUTPUT SUCCESS FILE
-    $uploadSuccessCount = outputFile($csvOutputSuccessFileHandle, $orderedConfigSettingNames, $config, $dataInputColumnNames, $infoColumnNames, $successObjects, $invoiceNumbersByArPaymentControlId);
+    $csvOutputFilePath = getNewFilePath($csvInputFilePath, $csvOutputSuccessFileNameTag);
 }
 else{
-    // OUTPUT FAILURE FILE
-    $uploadFailureCount = outputFile($csvOutputFailureFileHandle, $orderedConfigSettingNames, $config, $dataInputColumnNames, $infoColumnNames, $failureObjects, $invoiceNumbersByArPaymentControlId);
+    $csvOutputFilePath = getNewFilePath($csvInputFilePath, $csvOutputFailureFileNameTag);
 }
 
+$csvOutputFileHandle = @fopen($csvOutputFilePath, 'w');
+if($csvOutputFileHandle === FALSE){
+    exit('Error: unable to open CSV output file for writing: (' . $csvOutputFilePath . ")\n");
+}
+$transactionCount = outputFile($csvOutputFileHandle, $orderedConfigSettingNames, $config, $dataInputColumnNames, $infoColumnNames, $resultObjects, $invoiceNumbersByArPaymentControlId);
+
 // OUTPUT RESULT COUNTS
-echo 'Transaction Success Count: ' . $uploadSuccessCount . "\n";
-echo 'Transaction Failure Count: ' . $uploadFailureCount . "\n";
+echo 'Transaction Count: ' . $transactionCount . "\n";
 
 
 ///////////////
