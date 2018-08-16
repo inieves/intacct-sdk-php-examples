@@ -106,6 +106,10 @@ $csvOutputFailureFilePath = NULL;
 $csvOutputFailureFileHandle = NULL;
 $csvOutputFailureFileDataRow = NULL;
 
+// INVOICE NUMBERS TO TRANSLATE TO RECORD NUMBERS
+$applyToInvoiceNumbers = NULL;
+$applyToRecordNumbersByInvoiceNumber = NULL;
+
 /////////////////
 // INPUT FILES //
 /////////////////
@@ -188,7 +192,6 @@ if(count($dataInputRows) === 0){
     exit("Error: no rows input\n");
 }
 
-
 //////////////////
 // OUTPUT FILES //
 //////////////////
@@ -227,6 +230,7 @@ $client = authenticate($sender_id, $sender_password, $company_id, $user_id, $use
 $rowIndex = $firstDataRowIndex;
 $lastArPayment = NULL;
 $arPayments = array();
+$applyToInvoiceNumbers = array();
 
 foreach($dataInputRows as $dataInputRow){
     // CHECK IF ROW IS JUST PAYMENT ITEM FIELDS OR A FULL PAYMENT
@@ -264,8 +268,8 @@ foreach($dataInputRows as $dataInputRow){
     }
     // HANDLE JUST PAYMENT ITEM
     else if($bothPaymentItemFieldsSpecified && !$someNonPaymentItemFieldSpecified && $lastArPayment!=NULL){
-        $applyToRecordNumber = getRecordNumberForInvoiceNumber($applyToInvoiceNumber, $client, $logger);
-        addArPaymentItemToArPayment($lastArPayment, $applyToRecordNumber, $applyToInvoiceAmount);
+        $applyToInvoiceNumbers[] = $applyToInvoiceNumber;
+        addArPaymentItemToArPayment($lastArPayment, $applyToInvoiceNumber, $applyToInvoiceAmount);
     }
     // HANDLE FULL PAYMENT
     else{
@@ -288,8 +292,8 @@ foreach($dataInputRows as $dataInputRow){
             $arPayment->setOverpaymentLocationId($overpaymentLocationId);
         }
         if($bothPaymentItemFieldsSpecified){
-            $applyToRecordNumber = getRecordNumberForInvoiceNumber($applyToInvoiceNumber, $client, $logger);
-            addArPaymentItemToArPayment($arPayment, $applyToRecordNumber, $applyToInvoiceAmount);
+            $applyToInvoiceNumbers[] = $applyToInvoiceNumber;
+            addArPaymentItemToArPayment($arPayment, $applyToInvoiceNumber, $applyToInvoiceAmount);
         }
         // UPDATE LAST PAYMENT
         $lastArPayment = $arPayment;
@@ -297,6 +301,16 @@ foreach($dataInputRows as $dataInputRow){
         $arPayments[] = $arPayment;
     }
     $rowIndex++;
+}
+
+/////////////////////////////////////////////////
+// TRANSLATE INVOICE NUMBERS TO RECORD NUMBERS //
+/////////////////////////////////////////////////
+
+$applyToRecordNumbersByInvoiceNumber = getRecordNumbersByInvoiceNumbers($applyToInvoiceNumbers, $client, $logger);
+
+foreach($arPayments as $arPayment){
+    translateArPaymentItemsInArPayment($arPayment, $applyToRecordNumbersByInvoiceNumber);
 }
 
 //////////////////////
@@ -552,6 +566,15 @@ function addArPaymentItemToArPayment($arPayment, $invoiceKey, $invoiceAmount){
     $arPayment->setApplyToTransactions($applyToTransactions);
 }
 
+function translateArPaymentItemsInArPayment($arPayment, $recordNumbersByInvoiceNumbers){
+    $applyToTransactions = $arPayment->getApplyToTransactions();
+    foreach($applyToTransactions as $arPaymentItem){
+        $invoiceNumber = $arPaymentItem->getApplyToRecordId();
+        $recordNumber = $recordNumbersByInvoiceNumbers[$invoiceNumber];
+        $arPaymentItem->setApplyToRecordId($recordNumber);
+    }
+}
+
 function getPaymentMethodConstantFromString($s){
     switch($s){
         case 'Printed Check': return 'PAYMENT_METHOD_CHECK';
@@ -579,11 +602,14 @@ function getPaymentMethodStringFromConstant($c){
     }
 }
 
-function getRecordNumberForInvoiceNumber($invoiceNumber, $client, $logger){
-    $queryString = new QueryString("RECORDID='" . $invoiceNumber . "'");
+function getRecordNumbersByInvoiceNumbers($invoiceNumbers, $client, $logger){
+    foreach($invoiceNumbers as $key=>$value){
+        $invoiceNumbers[$key] = "'" . $value . "'";
+    }
+    $queryString = new QueryString('RECORDID in (' . implode(',', $invoiceNumbers) . ')');
     $readByQuery = new ReadByQuery();
     $readByQuery->setObjectName('ARINVOICE');
-    $readByQuery->setFields(array('RECORDNO'));
+    $readByQuery->setFields(array('RECORDNO', 'RECORDID'));
     $readByQuery->setQuery($queryString);
     try{
         // EXECUTE
@@ -613,6 +639,10 @@ function getRecordNumberForInvoiceNumber($invoiceNumber, $client, $logger){
         ]);
         exit('Error: could not translate an invoice_number (' . $invoiceNumber . ") into a record number\n");
     }
-    $result = json_decode(json_encode($result->getData()), 1)[0]['RECORDNO'];
-    return $result;
+    $results = json_decode(json_encode($result->getData()), 1);
+    $recordNumbers = array();
+    foreach($results as $result){
+        $recordNumbers[$result['RECORDID']] = $result['RECORDNO'];
+    }
+    return $recordNumbers;
 }
