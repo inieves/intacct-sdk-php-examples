@@ -295,7 +295,7 @@ foreach($dataInputRows as $dataInputRow){
 $applyToRecordNumbersByInvoiceNumber = getRecordNumbersByInvoiceNumbers($invoiceNumbersByArPaymentControlId, $client, $logger);
 
 foreach($arPayments as $arPayment){
-    translateInvoiceNumbersToRecordNumbersInArPaymentItems($arPayment, $applyToRecordNumbersByInvoiceNumber);
+    translateInvoiceNumbersToRecordNumbersInArPaymentItems($arPayment, $applyToRecordNumbersByInvoiceNumber, $invoiceNumbersByArPaymentControlId);
 }
 
 /////////////////////////////////
@@ -554,26 +554,21 @@ function storeArPaymentInvoiceNumber($arPayment, $applyToInvoiceNumber, &$invoic
     $invoiceNumbersByArPaymentControlId[$arPayment->getControlId()][] = $applyToInvoiceNumber;
 }
 
-function storeInvoiceNumbersFromArPaymentItems($arPayment, $invoiceNumbersByArPaymentControlId){
-    $invoiceNumbers = array();
+function translateInvoiceNumbersToRecordNumbersInArPaymentItems($arPayment, $recordNumbersByInvoiceNumbers, $invoiceNumbersByArPaymentControlId){
     $applyToTransactions = $arPayment->getApplyToTransactions();
-    foreach($applyToTransactions as $arPaymentItem){
-        $invoiceNumbers[] = $arPaymentItem->getApplyToRecordId();
-    }
-    $invoiceNumbersByArPaymentControlId[$arPayment->getControlId()] = $invoiceNumbers;
-}
-
-function translateInvoiceNumbersToRecordNumbersInArPaymentItems($arPayment, $recordNumbersByInvoiceNumbers){
-    $applyToTransactions = $arPayment->getApplyToTransactions();
-    foreach($applyToTransactions as $arPaymentItem){
-        $invoiceNumber = $arPaymentItem->getApplyToRecordId();
-        if(isset($recordNumbersByInvoiceNumbers[$invoiceNumber])){
-            $recordNumber = $recordNumbersByInvoiceNumbers[$invoiceNumber];
+    if(!empty($applyToTransactions)){
+        $invoiceNumbers = $invoiceNumbersByArPaymentControlId[$arPayment->getControlId()];
+        for($i=0; $i<count($applyToTransactions); $i++){
+            $arPaymentItem = $applyToTransactions[$i];
+            $invoiceNumber = $invoiceNumbers[$i];
+            if(isset($recordNumbersByInvoiceNumbers[$invoiceNumber])){
+                $recordNumber = $recordNumbersByInvoiceNumbers[$invoiceNumber];
+            }
+            else{
+                $recordNumber = '(invoiceNumber:' . $invoiceNumber . ',recordNumber:NULL) '; // extra space because intacct error message output is missing this space
+            }
+            $arPaymentItem->setApplyToRecordId($recordNumber);
         }
-        else{
-            $recordNumber = NULL;
-        }
-        $arPaymentItem->setApplyToRecordId($recordNumber);
     }
 }
 
