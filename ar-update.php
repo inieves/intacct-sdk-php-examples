@@ -499,8 +499,8 @@ function outputFile($fileHandle, $orderedConfigColumnNames, $configRow, $ordered
         }
         else{
             $invoiceNumbers = $invoiceNumbersByArPaymentControlId[$dataObject[$paymentObjectName]->getControlId()];
-            $firstPaymentItem = array_shift($arPaymentApplyToTransactions);
-            $firstInvoiceNumber = array_shift($invoiceNumbers);
+            $firstPaymentItem = $arPaymentApplyToTransactions[0];
+            $firstInvoiceNumber = $invoiceNumbers[0];
             $arPaymentFields[$dataApplyToInvoiceNumber] = $firstInvoiceNumber;
             $arPaymentFields[$dataApplyToInvoiceAmount] = $firstPaymentItem->getAmountToApply();
         }
@@ -515,25 +515,27 @@ function outputFile($fileHandle, $orderedConfigColumnNames, $configRow, $ordered
         fputcsv($fileHandle, $orderedTransactionRow);
         $objectCount++;
         // BUILD ORDERED ADDITIONAL PAYMENT ITEM ROWS
-        while(!empty($arPaymentApplyToTransactions)){
-            $orderedAdditionalPaymentItemRow = array();
-            $additionalPaymentItem = array_shift($arPaymentApplyToTransactions);
-            $additionalInvoiceNumber = array_shift($invoiceNumbers);
-            foreach($orderedDataColumnNames as $orderedDataColumnName){
-                if($orderedDataColumnName === $dataApplyToInvoiceNumber){
-                    $orderedAdditionalPaymentItemRow[] = $additionalInvoiceNumber;
+        if(!empty($arPaymentApplyToTransactions)){
+            for($i=1; $i<count($arPaymentApplyToTransactions); $i++){
+                $orderedAdditionalPaymentItemRow = array();
+                $additionalPaymentItem = $arPaymentApplyToTransactions[$i];
+                $additionalInvoiceNumber = $invoiceNumbers[$i];
+                foreach($orderedDataColumnNames as $orderedDataColumnName){
+                    if($orderedDataColumnName === $dataApplyToInvoiceNumber){
+                        $orderedAdditionalPaymentItemRow[] = $additionalInvoiceNumber;
+                    }
+                    else if($orderedDataColumnName === $dataApplyToInvoiceAmount){
+                        $orderedAdditionalPaymentItemRow[] = $additionalPaymentItem->getAmountToApply();
+                    }
+                    else{
+                        $orderedAdditionalPaymentItemRow[] = '';
+                    }
                 }
-                else if($orderedDataColumnName === $dataApplyToInvoiceAmount){
-                    $orderedAdditionalPaymentItemRow[] = $additionalPaymentItem->getAmountToApply();
-                }
-                else{
+                foreach($infoColumnNames as $infoColumnName){
                     $orderedAdditionalPaymentItemRow[] = '';
                 }
+                fputcsv($fileHandle, $orderedAdditionalPaymentItemRow);
             }
-            foreach($infoColumnNames as $infoColumnName){
-                $orderedAdditionalPaymentItemRow[] = '';
-            }
-            fputcsv($fileHandle, $orderedAdditionalPaymentItemRow);
         }
     }
     return $objectCount;
